@@ -408,9 +408,7 @@ rg -l -t rust 'unwrap\(' | xargs ast-grep run -l Rust -p '$X.unwrap()' --json
 
 ---
 
-## Morph Warp Grep — AI-Powered Code Search
-
-**Use `mcp__morph-mcp__warp_grep` for exploratory "how does X work?" questions.** An AI agent expands your query, greps the codebase, reads relevant files, and returns precise line ranges with full context.
+## Grep
 
 **Use `ripgrep` for targeted searches.** When you know exactly what you're looking for.
 
@@ -420,26 +418,13 @@ rg -l -t rust 'unwrap\(' | xargs ast-grep run -l Rust -p '$X.unwrap()' --json
 
 | Scenario | Tool | Why |
 |----------|------|-----|
-| "How is the render pipeline implemented?" | `warp_grep` | Exploratory; don't know where to start |
-| "Where is the diff computation?" | `warp_grep` | Need to understand architecture |
 | "Find all uses of `Buffer::new`" | `ripgrep` | Targeted literal search |
 | "Find files with `unwrap()`" | `ripgrep` | Simple pattern |
 | "Replace all `unwrap()` with `expect()`" | `ast-grep` | Structural refactor |
 
-### warp_grep Usage
-
-```
-mcp__morph-mcp__warp_grep(
-  repoPath: "/dp/frankentui",
-  query: "How does the buffer diff algorithm work?"
-)
-```
-
-Returns structured results with file paths, line ranges, and extracted code snippets.
 
 ### Anti-Patterns
 
-- **Don't** use `warp_grep` to find a specific function name → use `ripgrep`
 - **Don't** use `ripgrep` to understand "how does X work" → wastes time with manual reads
 - **Don't** use `ripgrep` for codemods → risks collateral edits
 
