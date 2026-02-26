@@ -261,3 +261,71 @@ fn parses_chat_file_from_disk() {
         Some("gemini-c-file")
     );
 }
+
+#[test]
+fn chat_parser_handles_root_style_type_fields_and_tool_calls() {
+    let input = r#"{
+  "sessionId":"gemini-s-root",
+  "messages":[
+    {
+      "messageId":101,
+      "type":"user",
+      "timestamp":"2026-02-10T10:00:00Z",
+      "content":"find usage"
+    },
+    {
+      "messageId":102,
+      "type":"gemini",
+      "timestamp":"2026-02-10T10:00:01Z",
+      "toolCalls":[
+        {
+          "id":"tc-1",
+          "name":"Read",
+          "args":{"path":"src/lib.rs"}
+        }
+      ]
+    },
+    {
+      "messageId":103,
+      "type":"gemini",
+      "timestamp":"2026-02-10T10:00:02Z",
+      "toolCalls":[
+        {
+          "id":"tc-1",
+          "name":"Read",
+          "response":{"text":"ok"}
+        }
+      ]
+    }
+  ]
+}"#;
+
+    let result =
+        parse_chat_session_json(input, "run-root-style", "fixtures/gemini/root_style.json")
+            .expect("root-style chat session should parse");
+
+    assert_eq!(result.events.len(), 3);
+
+    assert!(result.events[0].event_id.ends_with("-101"));
+    assert_eq!(result.events[0].event_type, EventType::Prompt);
+    assert_eq!(result.events[0].role, ActorRole::User);
+    assert_eq!(
+        result.events[0].session_id.as_deref(),
+        Some("gemini-s-root")
+    );
+
+    assert!(result.events[1].event_id.ends_with("-102"));
+    assert_eq!(result.events[1].record_format, RecordFormat::ToolCall);
+    assert_eq!(result.events[1].event_type, EventType::ToolInvocation);
+    assert_eq!(result.events[1].tool_name.as_deref(), Some("Read"));
+    assert_eq!(result.events[1].tool_call_id.as_deref(), Some("tc-1"));
+    assert_eq!(
+        result.events[1].tool_arguments_json.as_deref(),
+        Some(r#"{"path":"src/lib.rs"}"#)
+    );
+
+    assert!(result.events[2].event_id.ends_with("-103"));
+    assert_eq!(result.events[2].record_format, RecordFormat::ToolResult);
+    assert_eq!(result.events[2].event_type, EventType::ToolOutput);
+    assert_eq!(result.events[2].tool_result_text.as_deref(), Some("ok"));
+}

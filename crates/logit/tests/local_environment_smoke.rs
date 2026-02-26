@@ -40,12 +40,12 @@ fn seed_local_layout(source_root: &Path, home_dir: &Path) -> String {
         include_str!("../../../fixtures/claude/project_session.jsonl"),
     );
     write_file(
-        &source_root.join(".gemini/history/chat_session.jsonl"),
-        r#"{"kind":"message","role":"user","content":"gemini smoke row"}"#,
+        &source_root.join(".gemini/tmp/run-001/logs.json"),
+        r#"[{"messageId":1,"sessionId":"gemini-s-smoke","type":"user","timestamp":"2026-02-03T08:30:00Z","message":"gemini smoke row"}]"#,
     );
     write_file(
-        &source_root.join(".amp/history/thread.jsonl"),
-        r#"{"type":"message","content":"amp smoke row"}"#,
+        &source_root.join(".amp/file-changes/T-smoke-001/change-001"),
+        r#"{"id":"fc-smoke-1","uri":"src/lib.rs","diff":"@@ -1 +1 @@\n-a\n+b","timestamp":1740467004123,"isNewFile":false,"reverted":false}"#,
     );
     write_file(
         &source_root.join(".opencode/sessions/session.jsonl"),
@@ -86,15 +86,15 @@ fn orchestrator_smoke_handles_local_layout_and_adapter_coverage() {
     );
     assert!(
         result
-            .warnings
+            .events
             .iter()
-            .any(|warning| warning.contains("adapter `gemini` not yet supported"))
+            .any(|event| event.adapter_name == AgentSource::Gemini)
     );
     assert!(
         result
-            .warnings
+            .events
             .iter()
-            .any(|warning| warning.contains("adapter `amp` not yet supported"))
+            .any(|event| event.adapter_name == AgentSource::Amp)
     );
     assert!(
         result
@@ -159,6 +159,16 @@ fn normalize_command_smoke_writes_artifacts_for_local_layout() {
         event_rows
             .iter()
             .any(|row| row.get("adapter_name").and_then(Value::as_str) == Some("claude"))
+    );
+    assert!(
+        event_rows
+            .iter()
+            .any(|row| row.get("adapter_name").and_then(Value::as_str) == Some("gemini"))
+    );
+    assert!(
+        event_rows
+            .iter()
+            .any(|row| row.get("adapter_name").and_then(Value::as_str) == Some("amp"))
     );
 
     let stats: Value = serde_json::from_str(

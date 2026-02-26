@@ -73,7 +73,7 @@ fn logs_classify_level_kind_and_role_precedence_explicitly() {
     assert_eq!(result.events[4].role, ActorRole::System);
     assert_eq!(result.events[5].event_type, EventType::Error);
     assert_eq!(result.events[5].role, ActorRole::Runtime);
-    assert_eq!(result.events[5].event_id, "gemini-log-000006");
+    assert!(result.events[5].event_id.contains("-000006"));
 }
 
 #[test]
@@ -95,12 +95,12 @@ fn logs_missing_timestamp_and_blank_id_use_fallbacks() {
             .iter()
             .any(|warning| warning.contains("missing timestamp"))
     );
-    assert_eq!(result.events[0].event_id, "gemini-log-000001");
+    assert!(result.events[0].event_id.contains("-000001"));
     assert_eq!(
         result.events[0].timestamp_quality,
         TimestampQuality::Fallback
     );
-    assert_eq!(result.events[1].event_id, "gemini-log-000002");
+    assert!(result.events[1].event_id.contains("-000002"));
     assert_eq!(
         result.events[1].timestamp_quality,
         TimestampQuality::Fallback

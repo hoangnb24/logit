@@ -42,7 +42,7 @@ fn seed_realistic_local_environment(home_dir: &Path) {
 
     write_file(
         &home_dir.join(".gemini/tmp/run-001/logs.json"),
-        r#"{"status":"ok"}"#,
+        r#"[{"messageId":1,"sessionId":"gemini-s-001","type":"user","timestamp":"2026-02-03T08:30:00Z","message":"summarize"}]"#,
     );
     write_file(
         &home_dir.join(".gemini/history/chat.jsonl"),
@@ -64,6 +64,10 @@ fn seed_realistic_local_environment(home_dir: &Path) {
     write_file(
         &home_dir.join(".amp/logs/runtime.log"),
         "amp runtime diagnostics\n",
+    );
+    write_file(
+        &home_dir.join(".amp/file-changes/T-amp-001/change-001"),
+        r#"{"id":"fc-001","uri":"src/main.rs","diff":"@@ -1 +1 @@\n-old\n+new","timestamp":1740467005123,"isNewFile":false,"reverted":false}"#,
     );
 
     write_file(
@@ -213,15 +217,26 @@ fn normalize_smoke_handles_realistic_local_home_and_adapter_coverage() {
     .expect("sources artifact should parse");
     assert_eq!(
         sources.get("total_sources").and_then(Value::as_u64),
-        Some(15)
+        Some(16)
     );
     let adapter_counts = sources
         .get("adapter_counts")
         .and_then(Value::as_object)
         .expect("adapter_counts object should exist");
-    for adapter in ["codex", "claude", "gemini", "amp", "opencode"] {
-        assert_eq!(adapter_counts.get(adapter).and_then(Value::as_u64), Some(3));
-    }
+    assert_eq!(adapter_counts.get("codex").and_then(Value::as_u64), Some(3));
+    assert_eq!(
+        adapter_counts.get("claude").and_then(Value::as_u64),
+        Some(3)
+    );
+    assert_eq!(
+        adapter_counts.get("gemini").and_then(Value::as_u64),
+        Some(3)
+    );
+    assert_eq!(adapter_counts.get("amp").and_then(Value::as_u64), Some(4));
+    assert_eq!(
+        adapter_counts.get("opencode").and_then(Value::as_u64),
+        Some(3)
+    );
 
     let history_usage: Value = serde_json::from_str(
         &std::fs::read_to_string(&discovery_layout.zsh_history_usage_json)
@@ -279,13 +294,11 @@ fn normalize_smoke_handles_realistic_local_home_and_adapter_coverage() {
             .any(|row| row.get("adapter_name").and_then(Value::as_str) == Some("claude"))
     );
     assert!(
-        !rows
-            .iter()
+        rows.iter()
             .any(|row| row.get("adapter_name").and_then(Value::as_str) == Some("gemini"))
     );
     assert!(
-        !rows
-            .iter()
+        rows.iter()
             .any(|row| row.get("adapter_name").and_then(Value::as_str) == Some("amp"))
     );
     assert!(

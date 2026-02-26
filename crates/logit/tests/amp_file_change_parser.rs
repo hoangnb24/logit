@@ -1,4 +1,8 @@
-use logit::adapters::amp::{DEFAULT_CHANGE_BLOB_LIMIT_BYTES, parse_file_change_artifact};
+use logit::adapters::amp::{
+    DEFAULT_CHANGE_BLOB_LIMIT_BYTES, parse_file_change_artifact, parse_file_change_event_file,
+    parse_file_change_event_json,
+};
+use logit::models::{ActorRole, EventType, RecordFormat, TimestampQuality};
 
 #[test]
 fn parses_attachment_blob_limit_fixture_into_telemetry() {
@@ -142,4 +146,62 @@ fn supports_alias_fields_and_string_blob_limit_values() {
     assert!(parsed.file_changes[0].before_truncated);
     assert!(!parsed.file_changes[0].after_truncated);
     assert!(parsed.warnings.is_empty());
+}
+
+#[test]
+fn parses_root_style_file_change_record_into_canonical_event() {
+    let raw = r#"{
+  "id":"fc-100",
+  "uri":"src/main.rs",
+  "before":"old",
+  "after":"new",
+  "diff":"@@ -1 +1 @@\n-old\n+new",
+  "isNewFile":false,
+  "reverted":false,
+  "timestamp":1740467005123
+}"#;
+
+    let parsed =
+        parse_file_change_event_json(raw, "run-amp", "/tmp/.amp/file-changes/T-amp-001/fc-100")
+            .expect("root-style file change should parse");
+    assert_eq!(parsed.events.len(), 1);
+    assert!(parsed.warnings.is_empty());
+
+    let event = &parsed.events[0];
+    assert_eq!(event.event_id, "fc-100");
+    assert_eq!(event.record_format, RecordFormat::ToolResult);
+    assert_eq!(event.event_type, EventType::ToolOutput);
+    assert_eq!(event.role, ActorRole::Tool);
+    assert_eq!(event.timestamp_quality, TimestampQuality::Exact);
+    assert_eq!(event.conversation_id.as_deref(), Some("T-amp-001"));
+    assert_eq!(event.content_mime.as_deref(), Some("text/x-diff"));
+    assert!(
+        event
+            .tool_result_text
+            .as_deref()
+            .is_some_and(|text| text.contains("@@ -1 +1 @@"))
+    );
+}
+
+#[test]
+fn parses_file_change_record_from_disk() {
+    let file = std::env::temp_dir().join(format!(
+        "logit-amp-file-change-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock is valid")
+            .as_nanos()
+    ));
+    std::fs::write(
+        &file,
+        r#"{"id":"fc-disk","uri":"README.md","diff":"@@ -1 +1 @@","timestamp":"2026-02-10T11:00:00Z"}"#,
+    )
+    .expect("fixture write should succeed");
+
+    let parsed = parse_file_change_event_file(&file, "run-disk")
+        .expect("file-change file parser should succeed");
+    assert_eq!(parsed.events.len(), 1);
+    assert!(parsed.warnings.is_empty());
+    assert_eq!(parsed.events[0].event_id, "fc-disk");
+    assert_eq!(parsed.events[0].event_type, EventType::ToolOutput);
 }

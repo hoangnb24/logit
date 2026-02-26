@@ -139,12 +139,12 @@ fn orchestrator_fans_in_codex_and_claude_sources() {
 fn orchestrator_surfaces_non_fatal_warnings_for_unsupported_adapters() {
     let source_root = unique_temp_dir("logit-orchestrator-unsupported");
     write_file(
-        &source_root.join(".gemini/history/chat.jsonl"),
+        &source_root.join(".opencode/sessions/chat.jsonl"),
         r#"{"kind":"message","text":"hello"}"#,
     );
 
     let mut plan = default_plan();
-    plan.adapters = vec![AdapterKind::Gemini];
+    plan.adapters = vec![AdapterKind::OpenCode];
 
     let result = orchestrate_normalization(
         &plan,
@@ -160,17 +160,17 @@ fn orchestrator_surfaces_non_fatal_warnings_for_unsupported_adapters() {
             .iter()
             .any(|warning| warning.contains("not yet supported"))
     );
-    let gemini_health = result
+    let opencode_health = result
         .adapter_health
-        .get("gemini")
-        .expect("health report should include gemini");
-    assert_eq!(gemini_health.status.as_str(), "skipped");
+        .get("opencode")
+        .expect("health report should include opencode");
+    assert_eq!(opencode_health.status.as_str(), "skipped");
     assert_eq!(
-        gemini_health.reason.as_deref(),
+        opencode_health.reason.as_deref(),
         Some("adapter_not_supported_by_normalize_v1")
     );
     assert!(
-        gemini_health
+        opencode_health
             .warnings
             .iter()
             .any(|warning| warning.contains("not yet supported"))

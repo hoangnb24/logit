@@ -102,5 +102,41 @@ fn parses_logs_file_from_disk() {
     let result = parse_logs_file(&file, "run-file").expect("file parse should succeed");
     assert_eq!(result.events.len(), 1);
     assert!(result.warnings.is_empty());
-    assert_eq!(result.events[0].event_id, "file-1");
+    assert!(result.events[0].event_id.ends_with("-file-1"));
+}
+
+#[test]
+fn parses_root_style_log_rows_with_type_and_numeric_message_id() {
+    let input = r#"[
+  {
+    "sessionId":"gemini-s-root",
+    "messageId":42,
+    "type":"user",
+    "message":"inspect project",
+    "timestamp":1740467004000
+  },
+  {
+    "sessionId":"gemini-s-root",
+    "type":"gemini",
+    "message":"done",
+    "timestamp":"2026-02-03T08:30:01Z"
+  }
+]"#;
+
+    let result = parse_logs_json_array(input, "run-root", "fixtures/gemini/root_logs.json")
+        .expect("root-style logs should parse");
+
+    assert_eq!(result.events.len(), 2);
+    assert!(result.warnings.is_empty());
+
+    let first = &result.events[0];
+    assert!(first.event_id.ends_with("-42"));
+    assert_eq!(first.session_id.as_deref(), Some("gemini-s-root"));
+    assert_eq!(first.conversation_id.as_deref(), Some("gemini-s-root"));
+    assert_eq!(first.event_type, EventType::Prompt);
+    assert_eq!(first.role, ActorRole::User);
+
+    let second = &result.events[1];
+    assert_eq!(second.event_type, EventType::Response);
+    assert_eq!(second.role, ActorRole::Assistant);
 }
