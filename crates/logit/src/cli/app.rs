@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use super::commands::{
-    inspect::InspectArgs, normalize::NormalizeArgs, snapshot::SnapshotArgs, validate::ValidateArgs,
+    ingest::IngestArgs, inspect::InspectArgs, normalize::NormalizeArgs, query::QueryArgs,
+    snapshot::SnapshotArgs, validate::ValidateArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -34,4 +35,6 @@ pub enum Command {
     Normalize(NormalizeArgs),
     Inspect(InspectArgs),
     Validate(ValidateArgs),
+    Ingest(IngestArgs),
+    Query(QueryArgs),
 }

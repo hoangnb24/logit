@@ -8,6 +8,8 @@ use clap::error::ErrorKind;
 use logit::cli::app::{Cli, Command, RuntimeArgs};
 use logit::cli::commands;
 use logit::config::RuntimePaths;
+use logit::models::{QueryEnvelope, QueryEnvelopeCommandFailure};
+use serde_json::json;
 
 const EXIT_SUCCESS: i32 = 0;
 const EXIT_RUNTIME_FAILURE: i32 = 1;
@@ -24,17 +26,26 @@ fn run() -> i32 {
         Err(error) => return exit_code_for_parse_error(error),
     };
     let command_name = command_name(&cli.command);
-    println!("logit: starting `{command_name}`");
+    let json_only_response = command_requires_json_envelope(&cli.command);
+    if !json_only_response {
+        println!("logit: starting `{command_name}`");
+    }
 
     match execute(cli) {
         Ok(()) => {
-            println!("logit: completed `{command_name}` (exit_code={EXIT_SUCCESS})");
+            if !json_only_response {
+                println!("logit: completed `{command_name}` (exit_code={EXIT_SUCCESS})");
+            }
             EXIT_SUCCESS
         }
         Err(error) => {
             let exit_code = classify_runtime_error(&error);
-            eprintln!("logit: failed `{command_name}` (exit_code={exit_code})");
-            eprintln!("{error:#}");
+            if json_only_response {
+                print_json_error_envelope(command_name, &error);
+            } else {
+                eprintln!("logit: failed `{command_name}` (exit_code={exit_code})");
+                eprintln!("{error:#}");
+            }
             exit_code
         }
     }
@@ -54,6 +65,14 @@ fn execute(cli: Cli) -> Result<()> {
         Command::Validate(args) => {
             let runtime_paths = resolve_runtime_paths(&cli.runtime)?;
             commands::validate::run(&args, &runtime_paths)
+        }
+        Command::Ingest(args) => {
+            let runtime_paths = resolve_runtime_paths(&cli.runtime)?;
+            commands::ingest::run(&args, &runtime_paths)
+        }
+        Command::Query(args) => {
+            let runtime_paths = resolve_runtime_paths(&cli.runtime)?;
+            commands::query::run(&args, &runtime_paths)
         }
     }
 }
@@ -88,6 +107,28 @@ fn command_name(command: &Command) -> &'static str {
         Command::Normalize(_) => "normalize",
         Command::Inspect(_) => "inspect",
         Command::Validate(_) => "validate",
+        Command::Ingest(_) => "ingest",
+        Command::Query(_) => "query",
+    }
+}
+
+fn command_requires_json_envelope(command: &Command) -> bool {
+    matches!(command, Command::Ingest(_) | Command::Query(_))
+}
+
+fn print_json_error_envelope(command_name: &str, error: &anyhow::Error) {
+    if let Some(failure) = error.downcast_ref::<QueryEnvelopeCommandFailure>()
+        && let Ok(encoded) = serde_json::to_string(failure.envelope())
+    {
+        println!("{encoded}");
+        return;
+    }
+
+    let fallback = QueryEnvelope::error(command_name, "runtime_failure", "command failed")
+        .with_error_details(json!({ "cause": format!("{error:#}") }));
+    match serde_json::to_string(&fallback) {
+        Ok(encoded) => println!("{encoded}"),
+        Err(_) => eprintln!("{error:#}"),
     }
 }
 

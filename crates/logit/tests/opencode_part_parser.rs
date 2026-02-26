@@ -56,12 +56,9 @@ not-json
 
     assert_eq!(parts.parts.len(), 1);
     assert!(parts.parts[0].is_step_event);
-    assert!(
-        parts
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("invalid JSON"))
-    );
+    assert!(parts.warnings.iter().any(|warning| {
+        warning.contains("line 3: invalid JSON payload in opencode part records JSONL")
+    }));
     assert!(
         parts
             .warnings

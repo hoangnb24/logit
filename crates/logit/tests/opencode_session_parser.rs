@@ -38,12 +38,9 @@ not-json
 
     assert_eq!(parsed.messages.len(), 2);
     assert_eq!(parsed.sessions[0].message_count, 2);
-    assert!(
-        parsed
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("invalid JSON"))
-    );
+    assert!(parsed.warnings.iter().any(|warning| {
+        warning.contains("line 3: invalid JSON payload in opencode session metadata JSONL")
+    }));
     assert!(
         parsed
             .warnings

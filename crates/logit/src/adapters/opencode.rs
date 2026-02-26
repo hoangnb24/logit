@@ -97,6 +97,16 @@ pub struct OpenCodeAuxiliaryLogParseResult {
     pub warnings: Vec<String>,
 }
 
+fn parse_jsonl_value_line(
+    trimmed: &str,
+    line_number: usize,
+    parser_context: &str,
+) -> std::result::Result<Value, String> {
+    serde_json::from_str::<Value>(trimmed).map_err(|error| {
+        format!("line {line_number}: invalid JSON payload in {parser_context} ({error})")
+    })
+}
+
 pub fn parse_session_metadata_jsonl(raw_jsonl: &str) -> Result<OpenCodeMetadataParseResult> {
     let mut warnings = Vec::new();
     let mut messages = Vec::new();
@@ -110,13 +120,14 @@ pub fn parse_session_metadata_jsonl(raw_jsonl: &str) -> Result<OpenCodeMetadataP
             continue;
         }
 
-        let value: Value = match serde_json::from_str(trimmed) {
-            Ok(value) => value,
-            Err(error) => {
-                warnings.push(format!("line {line_number}: invalid JSON: {error}"));
-                continue;
-            }
-        };
+        let value: Value =
+            match parse_jsonl_value_line(trimmed, line_number, "opencode session metadata JSONL") {
+                Ok(value) => value,
+                Err(warning) => {
+                    warnings.push(warning);
+                    continue;
+                }
+            };
 
         let Some(object) = value.as_object() else {
             warnings.push(format!("line {line_number}: record is not a JSON object"));
@@ -412,13 +423,14 @@ pub fn parse_part_records_jsonl(
             continue;
         }
 
-        let value: Value = match serde_json::from_str(trimmed) {
-            Ok(value) => value,
-            Err(error) => {
-                warnings.push(format!("line {line_number}: invalid JSON: {error}"));
-                continue;
-            }
-        };
+        let value: Value =
+            match parse_jsonl_value_line(trimmed, line_number, "opencode part records JSONL") {
+                Ok(value) => value,
+                Err(warning) => {
+                    warnings.push(warning);
+                    continue;
+                }
+            };
 
         let Some(object) = value.as_object() else {
             warnings.push(format!("line {line_number}: record is not a JSON object"));

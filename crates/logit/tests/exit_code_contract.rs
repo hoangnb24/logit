@@ -121,3 +121,149 @@ fn successful_validate_exits_zero() {
 
     assert_eq!(status.code(), Some(EXIT_SUCCESS));
 }
+
+#[test]
+fn ingest_refresh_missing_events_exits_runtime_failure_code() {
+    let temp = unique_temp_dir("logit-exit-ingest-runtime-fail");
+    let home_dir = temp.join("home");
+    let cwd = temp.join("cwd");
+    let out_dir = temp.join("out");
+    std::fs::create_dir_all(&home_dir).expect("home dir should be creatable");
+    std::fs::create_dir_all(&cwd).expect("cwd dir should be creatable");
+    std::fs::create_dir_all(&out_dir).expect("out dir should be creatable");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_logit"))
+        .args(["--home-dir"])
+        .arg(&home_dir)
+        .args(["--cwd"])
+        .arg(&cwd)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["ingest", "refresh", "--fail-fast"])
+        .status()
+        .expect("command should execute");
+
+    assert_eq!(status.code(), Some(EXIT_RUNTIME_FAILURE));
+}
+
+#[test]
+fn ingest_refresh_with_valid_events_exits_zero() {
+    let temp = unique_temp_dir("logit-exit-ingest-success");
+    let home_dir = temp.join("home");
+    let cwd = temp.join("cwd");
+    let out_dir = temp.join("out");
+    std::fs::create_dir_all(&home_dir).expect("home dir should be creatable");
+    std::fs::create_dir_all(&cwd).expect("cwd dir should be creatable");
+    std::fs::create_dir_all(&out_dir).expect("out dir should be creatable");
+    write_valid_events_jsonl(&out_dir.join("events.jsonl"));
+
+    let status = Command::new(env!("CARGO_BIN_EXE_logit"))
+        .args(["--home-dir"])
+        .arg(&home_dir)
+        .args(["--cwd"])
+        .arg(&cwd)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["ingest", "refresh"])
+        .status()
+        .expect("command should execute");
+
+    assert_eq!(status.code(), Some(EXIT_SUCCESS));
+}
+
+#[test]
+fn query_sql_read_only_success_exits_zero() {
+    let temp = unique_temp_dir("logit-exit-query-runtime-fail");
+    let home_dir = temp.join("home");
+    let cwd = temp.join("cwd");
+    let out_dir = temp.join("out");
+    std::fs::create_dir_all(&home_dir).expect("home dir should be creatable");
+    std::fs::create_dir_all(&cwd).expect("cwd dir should be creatable");
+    std::fs::create_dir_all(&out_dir).expect("out dir should be creatable");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_logit"))
+        .args(["--home-dir"])
+        .arg(&home_dir)
+        .args(["--cwd"])
+        .arg(&cwd)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["query", "sql", "select 1"])
+        .status()
+        .expect("command should execute");
+
+    assert_eq!(status.code(), Some(EXIT_SUCCESS));
+}
+
+#[test]
+fn query_benchmark_with_valid_corpus_exits_zero() {
+    let temp = unique_temp_dir("logit-exit-query-benchmark-success");
+    let home_dir = temp.join("home");
+    let cwd = temp.join("cwd");
+    let out_dir = temp.join("out");
+    std::fs::create_dir_all(&home_dir).expect("home dir should be creatable");
+    std::fs::create_dir_all(&cwd).expect("cwd dir should be creatable");
+    std::fs::create_dir_all(&out_dir).expect("out dir should be creatable");
+    write_valid_events_jsonl(&out_dir.join("events.jsonl"));
+
+    let ingest_status = Command::new(env!("CARGO_BIN_EXE_logit"))
+        .args(["--home-dir"])
+        .arg(&home_dir)
+        .args(["--cwd"])
+        .arg(&cwd)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["ingest", "refresh"])
+        .status()
+        .expect("ingest refresh should execute");
+    assert_eq!(
+        ingest_status.code(),
+        Some(EXIT_SUCCESS),
+        "ingest refresh should succeed before benchmark"
+    );
+
+    let corpus_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/benchmarks/answerability_question_corpus_v1.json");
+    let status = Command::new(env!("CARGO_BIN_EXE_logit"))
+        .args(["--home-dir"])
+        .arg(&home_dir)
+        .args(["--cwd"])
+        .arg(&cwd)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args(["query", "benchmark", "--corpus"])
+        .arg(&corpus_path)
+        .status()
+        .expect("query benchmark should execute");
+
+    assert_eq!(status.code(), Some(EXIT_SUCCESS));
+}
+
+#[test]
+fn query_benchmark_with_missing_corpus_exits_runtime_failure() {
+    let temp = unique_temp_dir("logit-exit-query-benchmark-fail");
+    let home_dir = temp.join("home");
+    let cwd = temp.join("cwd");
+    let out_dir = temp.join("out");
+    std::fs::create_dir_all(&home_dir).expect("home dir should be creatable");
+    std::fs::create_dir_all(&cwd).expect("cwd dir should be creatable");
+    std::fs::create_dir_all(&out_dir).expect("out dir should be creatable");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_logit"))
+        .args(["--home-dir"])
+        .arg(&home_dir)
+        .args(["--cwd"])
+        .arg(&cwd)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .args([
+            "query",
+            "benchmark",
+            "--corpus",
+            "/definitely/missing/answerability_question_corpus_v1.json",
+        ])
+        .status()
+        .expect("query benchmark should execute");
+
+    assert_eq!(status.code(), Some(EXIT_RUNTIME_FAILURE));
+}

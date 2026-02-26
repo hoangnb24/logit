@@ -24,6 +24,104 @@ impl NormalizedTimestamp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurationDerivationMethod {
+    Explicit,
+    Paired,
+    Heuristic,
+}
+
+impl DurationDerivationMethod {
+    #[must_use]
+    pub const fn duration_source(self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::Paired => "paired",
+            Self::Heuristic => "heuristic",
+        }
+    }
+
+    #[must_use]
+    pub const fn duration_quality(self) -> DurationQuality {
+        match self {
+            Self::Explicit => DurationQuality::High,
+            Self::Paired => DurationQuality::Medium,
+            Self::Heuristic => DurationQuality::Low,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DurationQuality {
+    High,
+    Medium,
+    Low,
+}
+
+impl DurationQuality {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedDuration {
+    pub duration_ms: u64,
+    pub method: DurationDerivationMethod,
+}
+
+impl DerivedDuration {
+    #[must_use]
+    pub const fn duration_source(self) -> &'static str {
+        self.method.duration_source()
+    }
+
+    #[must_use]
+    pub const fn duration_quality(self) -> &'static str {
+        self.method.duration_quality().as_str()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DurationDerivationInput {
+    pub explicit_duration_ms: Option<u64>,
+    pub started_at_unix_ms: Option<u64>,
+    pub finished_at_unix_ms: Option<u64>,
+    pub heuristic_duration_ms: Option<u64>,
+}
+
+#[must_use]
+pub fn derive_duration(input: DurationDerivationInput) -> Option<DerivedDuration> {
+    if let Some(duration_ms) = input.explicit_duration_ms {
+        return Some(DerivedDuration {
+            duration_ms,
+            method: DurationDerivationMethod::Explicit,
+        });
+    }
+
+    if let (Some(started_at_unix_ms), Some(finished_at_unix_ms)) =
+        (input.started_at_unix_ms, input.finished_at_unix_ms)
+        && finished_at_unix_ms >= started_at_unix_ms
+    {
+        return Some(DerivedDuration {
+            duration_ms: finished_at_unix_ms - started_at_unix_ms,
+            method: DurationDerivationMethod::Paired,
+        });
+    }
+
+    input
+        .heuristic_duration_ms
+        .map(|duration_ms| DerivedDuration {
+            duration_ms,
+            method: DurationDerivationMethod::Heuristic,
+        })
+}
+
 #[must_use]
 pub fn unix_timestamp_seconds() -> u64 {
     SystemTime::now()
@@ -136,7 +234,8 @@ fn to_unix_ms(parsed: OffsetDateTime) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        TimestampQuality, derive_timestamp, fallback_timestamp, format_unix_ms,
+        DurationDerivationInput, DurationDerivationMethod, DurationQuality, TimestampQuality,
+        derive_duration, derive_timestamp, fallback_timestamp, format_unix_ms,
         normalize_timestamp_exact, parse_timestamp_to_unix_ms,
     };
 
@@ -213,5 +312,120 @@ mod tests {
         let err =
             parse_timestamp_to_unix_ms("next friday").expect_err("unsupported string should fail");
         assert!(err.to_string().contains("unsupported timestamp format"));
+    }
+
+    #[test]
+    fn duration_derivation_uses_explicit_first() {
+        let derived = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: Some(50),
+            started_at_unix_ms: Some(1_000),
+            finished_at_unix_ms: Some(1_900),
+            heuristic_duration_ms: Some(900),
+        })
+        .expect("explicit duration should be selected");
+
+        assert_eq!(derived.duration_ms, 50);
+        assert_eq!(derived.method, DurationDerivationMethod::Explicit);
+    }
+
+    #[test]
+    fn duration_derivation_uses_paired_when_explicit_missing() {
+        let derived = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: None,
+            started_at_unix_ms: Some(10_000),
+            finished_at_unix_ms: Some(10_125),
+            heuristic_duration_ms: Some(9_999),
+        })
+        .expect("paired duration should be selected");
+
+        assert_eq!(derived.duration_ms, 125);
+        assert_eq!(derived.method, DurationDerivationMethod::Paired);
+    }
+
+    #[test]
+    fn duration_derivation_falls_back_to_heuristic() {
+        let derived = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: None,
+            started_at_unix_ms: None,
+            finished_at_unix_ms: None,
+            heuristic_duration_ms: Some(420),
+        })
+        .expect("heuristic duration should be selected");
+
+        assert_eq!(derived.duration_ms, 420);
+        assert_eq!(derived.method, DurationDerivationMethod::Heuristic);
+    }
+
+    #[test]
+    fn duration_derivation_rejects_inverted_pair_and_uses_heuristic() {
+        let derived = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: None,
+            started_at_unix_ms: Some(12_000),
+            finished_at_unix_ms: Some(11_999),
+            heuristic_duration_ms: Some(100),
+        })
+        .expect("heuristic should be used when paired timestamps are inverted");
+
+        assert_eq!(derived.duration_ms, 100);
+        assert_eq!(derived.method, DurationDerivationMethod::Heuristic);
+    }
+
+    #[test]
+    fn duration_derivation_returns_none_when_no_inputs_available() {
+        let derived = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: None,
+            started_at_unix_ms: Some(5_000),
+            finished_at_unix_ms: Some(4_000),
+            heuristic_duration_ms: None,
+        });
+        assert!(derived.is_none());
+    }
+
+    #[test]
+    fn duration_derivation_exposes_source_and_quality_markers() {
+        let explicit = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: Some(1),
+            started_at_unix_ms: Some(10),
+            finished_at_unix_ms: Some(11),
+            heuristic_duration_ms: Some(2),
+        })
+        .expect("explicit duration should be selected");
+        assert_eq!(explicit.duration_source(), "explicit");
+        assert_eq!(explicit.duration_quality(), "high");
+        assert_eq!(
+            explicit.method.duration_quality(),
+            DurationQuality::High,
+            "explicit duration should map to high confidence"
+        );
+
+        let paired = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: None,
+            started_at_unix_ms: Some(10),
+            finished_at_unix_ms: Some(15),
+            heuristic_duration_ms: Some(2),
+        })
+        .expect("paired duration should be selected");
+        assert_eq!(paired.duration_source(), "paired");
+        assert_eq!(paired.duration_quality(), "medium");
+        assert_eq!(
+            paired.method.duration_quality(),
+            DurationQuality::Medium,
+            "paired duration should map to medium confidence"
+        );
+
+        let heuristic = derive_duration(DurationDerivationInput {
+            explicit_duration_ms: None,
+            started_at_unix_ms: None,
+            finished_at_unix_ms: None,
+            heuristic_duration_ms: Some(5),
+        })
+        .expect("heuristic duration should be selected");
+        assert_eq!(heuristic.duration_source(), "heuristic");
+        assert_eq!(heuristic.duration_quality(), "low");
+        assert_eq!(
+            heuristic.method.duration_quality(),
+            DurationQuality::Low,
+            "heuristic duration should map to low confidence"
+        );
     }
 }
