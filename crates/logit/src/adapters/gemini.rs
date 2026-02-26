@@ -25,6 +25,15 @@ pub struct GeminiChatParseResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct GeminiToolDetails {
+    tool_name: Option<String>,
+    tool_call_id: Option<String>,
+    tool_arguments_json: Option<String>,
+    tool_result_text: Option<String>,
+    tool_calls_count: usize,
+}
+
 pub fn parse_logs_file(path: &Path, run_id: &str) -> Result<GeminiLogsParseResult> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read gemini logs file: {path:?}"))?;
@@ -44,6 +53,7 @@ pub fn parse_logs_json_array(
 
     let mut events = Vec::new();
     let mut warnings = Vec::new();
+    let source_path_hash = hash64(&source_path.to_string());
 
     for (index, record) in records.iter().enumerate() {
         let record_number = index + 1;
@@ -54,9 +64,13 @@ pub fn parse_logs_json_array(
             continue;
         };
 
-        let event_id = extract_string(object, &["event_id", "id"])
-            .unwrap_or_else(|| format!("gemini-log-{record_number:06}"));
-        let role_hint = extract_string(object, &["role", "actor"]);
+        let source_event_id =
+            extract_string(object, &["event_id", "id", "message_id", "messageId"]);
+        let event_id = source_event_id
+            .as_ref()
+            .map(|value| format!("gemini-{source_path_hash:016x}-{value}"))
+            .unwrap_or_else(|| format!("gemini-log-{source_path_hash:016x}-{record_number:06}"));
+        let role_hint = extract_string(object, &["role", "actor", "type"]);
         let level_hint = extract_string(object, &["level", "severity"]);
         let kind_hint = extract_string(object, &["event_type", "kind", "type"]);
         let (record_format, event_type, role) = classify_record(
@@ -77,8 +91,13 @@ pub fn parse_logs_json_array(
         let (timestamp_unix_ms, timestamp_utc, timestamp_quality) =
             map_timestamp(object, record_number, &mut warnings);
 
-        let conversation_id = extract_string(object, &["conversation_id", "session_id"]);
-        let model = extract_string(object, &["model", "model_name"]);
+        let message_session_id = extract_string(object, &["session_id", "sessionId"]);
+        let conversation_id = extract_string(
+            object,
+            &["conversation_id", "conversationId", "chat_id", "chatId"],
+        )
+        .or_else(|| message_session_id.clone());
+        let model = extract_string(object, &["model", "model_name", "modelName"]);
 
         let raw_hash = format!("{:016x}", hash64(&record.to_string()));
         let canonical_hash = format!(
@@ -102,6 +121,18 @@ pub fn parse_logs_json_array(
         if let Some(kind) = &kind_hint {
             metadata.insert("gemini_kind".to_string(), serde_json::json!(kind));
         }
+        if let Some(source_event_id) = &source_event_id {
+            metadata.insert(
+                "gemini_source_event_id".to_string(),
+                serde_json::json!(source_event_id),
+            );
+        }
+        if message_session_id.is_some() {
+            metadata.insert(
+                "gemini_session_id_source".to_string(),
+                serde_json::json!("record"),
+            );
+        }
 
         events.push(AgentLogEvent {
             schema_version: crate::models::SchemaVersion::AgentLogV1,
@@ -121,7 +152,7 @@ pub fn parse_logs_json_array(
             timestamp_utc,
             timestamp_unix_ms,
             timestamp_quality,
-            session_id: None,
+            session_id: message_session_id,
             conversation_id,
             turn_id: None,
             parent_event_id: None,
@@ -177,13 +208,14 @@ pub fn parse_chat_session_json(
 
     let mut events = Vec::new();
     let mut warnings = Vec::new();
+    let source_path_hash = hash64(&source_path.to_string());
 
     let root_conversation_id = extract_string(
         root,
         &["conversation_id", "conversationId", "chat_id", "chatId"],
     );
     let root_session_id = extract_string(root, &["session_id", "sessionId"]);
-    let root_model = extract_string(root, &["model", "model_name"]);
+    let root_model = extract_string(root, &["model", "model_name", "modelName"]);
 
     for (index, message) in messages.iter().enumerate() {
         let message_number = index + 1;
@@ -194,9 +226,12 @@ pub fn parse_chat_session_json(
             continue;
         };
 
-        let role_hint = extract_string(object, &["role", "author", "actor"]);
-        let (record_format, event_type, role) =
+        let role_hint = extract_string(object, &["role", "author", "actor", "type"]);
+        let base_classification =
             classify_chat_role(role_hint.as_deref(), message_number, &mut warnings);
+        let tool_details = extract_tool_details(object);
+        let (record_format, event_type, role) =
+            classify_with_tool_details(base_classification, &tool_details);
         let conversation_id = extract_string(
             object,
             &["conversation_id", "conversationId", "chat_id", "chatId"],
@@ -219,8 +254,12 @@ pub fn parse_chat_session_json(
         let conversation_id = conversation_id.or_else(|| root_conversation_id.clone());
         let session_id = session_id.or_else(|| root_session_id.clone());
 
-        let event_id = extract_string(object, &["event_id", "id", "message_id"])
-            .unwrap_or_else(|| format!("gemini-chat-{message_number:06}"));
+        let source_event_id =
+            extract_string(object, &["event_id", "id", "message_id", "messageId"]);
+        let event_id = source_event_id
+            .as_ref()
+            .map(|value| format!("gemini-{source_path_hash:016x}-{value}"))
+            .unwrap_or_else(|| format!("gemini-chat-{source_path_hash:016x}-{message_number:06}"));
         let (content_text, content_source) = extract_chat_content(object);
         if content_text.is_none() {
             warnings.push(format!(
@@ -233,7 +272,7 @@ pub fn parse_chat_session_json(
 
         let (timestamp_unix_ms, timestamp_utc, timestamp_quality) =
             map_timestamp(object, message_number, &mut warnings);
-        let message_model = extract_string(object, &["model", "model_name"]);
+        let message_model = extract_string(object, &["model", "model_name", "modelName"]);
         let model_source = if message_model.is_some() {
             Some("message")
         } else if root_model.is_some() {
@@ -303,6 +342,18 @@ pub fn parse_chat_session_json(
                 serde_json::json!(content_source),
             );
         }
+        if let Some(source_event_id) = &source_event_id {
+            metadata.insert(
+                "gemini_source_event_id".to_string(),
+                serde_json::json!(source_event_id),
+            );
+        }
+        if tool_details.tool_calls_count > 0 {
+            metadata.insert(
+                "gemini_tool_calls_count".to_string(),
+                serde_json::json!(tool_details.tool_calls_count),
+            );
+        }
         if let Some(parts_count) = object
             .get("content")
             .and_then(Value::as_array)
@@ -344,10 +395,10 @@ pub fn parse_chat_session_json(
             content_text,
             content_excerpt,
             content_mime: Some("text/plain".to_string()),
-            tool_name: None,
-            tool_call_id: None,
-            tool_arguments_json: None,
-            tool_result_text: None,
+            tool_name: tool_details.tool_name,
+            tool_call_id: tool_details.tool_call_id,
+            tool_arguments_json: tool_details.tool_arguments_json,
+            tool_result_text: tool_details.tool_result_text,
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
@@ -374,7 +425,7 @@ fn classify_record(
     if let Some(role) = role_hint {
         match role.to_ascii_lowercase().as_str() {
             "user" => return (RecordFormat::Message, EventType::Prompt, ActorRole::User),
-            "assistant" | "model" => {
+            "assistant" | "model" | "gemini" => {
                 return (
                     RecordFormat::Message,
                     EventType::Response,
@@ -421,6 +472,51 @@ fn classify_record(
 
     if let Some(kind) = kind_hint {
         match kind.to_ascii_lowercase().as_str() {
+            "user" | "prompt" => {
+                return (RecordFormat::Message, EventType::Prompt, ActorRole::User);
+            }
+            "assistant" | "model" | "gemini" | "response" => {
+                return (
+                    RecordFormat::Message,
+                    EventType::Response,
+                    ActorRole::Assistant,
+                );
+            }
+            "tool_call" | "tool_invocation" => {
+                return (
+                    RecordFormat::ToolCall,
+                    EventType::ToolInvocation,
+                    ActorRole::Tool,
+                );
+            }
+            "tool" | "tool_result" | "tool_output" => {
+                return (
+                    RecordFormat::ToolResult,
+                    EventType::ToolOutput,
+                    ActorRole::Tool,
+                );
+            }
+            "system" => {
+                return (
+                    RecordFormat::System,
+                    EventType::SystemNotice,
+                    ActorRole::System,
+                );
+            }
+            "warn" | "warning" | "status" | "notice" => {
+                return (
+                    RecordFormat::Diagnostic,
+                    EventType::StatusUpdate,
+                    ActorRole::Runtime,
+                );
+            }
+            "error" | "fatal" => {
+                return (
+                    RecordFormat::Diagnostic,
+                    EventType::Error,
+                    ActorRole::Runtime,
+                );
+            }
             "metric" => {
                 return (
                     RecordFormat::Diagnostic,
@@ -432,6 +528,13 @@ fn classify_record(
                 return (
                     RecordFormat::Diagnostic,
                     EventType::ArtifactReference,
+                    ActorRole::Runtime,
+                );
+            }
+            "info" | "debug" | "trace" | "log" => {
+                return (
+                    RecordFormat::Diagnostic,
+                    EventType::DebugLog,
                     ActorRole::Runtime,
                 );
             }
@@ -496,7 +599,7 @@ fn classify_chat_role(
         let normalized = role.to_ascii_lowercase();
         if !matches!(
             normalized.as_str(),
-            "user" | "assistant" | "model" | "system" | "tool"
+            "user" | "assistant" | "model" | "gemini" | "system" | "tool"
         ) {
             warnings.push(format!(
                 "message {message_number}: unknown role `{role}`; mapped to diagnostic runtime event"
@@ -532,13 +635,120 @@ fn extract_chat_content(
 
 fn extract_string(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
     for key in keys {
-        let Some(raw) = object.get(*key).and_then(Value::as_str) else {
+        let Some(raw) = object.get(*key).and_then(scalar_to_string) else {
             continue;
         };
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
+        if !raw.is_empty() {
+            return Some(raw);
         }
     }
     None
+}
+
+fn scalar_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(boolean) => Some(boolean.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn classify_with_tool_details(
+    fallback: (RecordFormat, EventType, ActorRole),
+    tool_details: &GeminiToolDetails,
+) -> (RecordFormat, EventType, ActorRole) {
+    if tool_details.tool_result_text.is_some() {
+        return (
+            RecordFormat::ToolResult,
+            EventType::ToolOutput,
+            ActorRole::Tool,
+        );
+    }
+    if tool_details.tool_name.is_some() || tool_details.tool_arguments_json.is_some() {
+        return (
+            RecordFormat::ToolCall,
+            EventType::ToolInvocation,
+            ActorRole::Tool,
+        );
+    }
+    fallback
+}
+
+fn extract_tool_details(object: &serde_json::Map<String, Value>) -> GeminiToolDetails {
+    let Some(tool_calls_value) = object
+        .get("toolCalls")
+        .or_else(|| object.get("tool_calls"))
+        .or_else(|| object.get("toolcalls"))
+    else {
+        return GeminiToolDetails::default();
+    };
+
+    let tool_calls = if let Some(array) = tool_calls_value.as_array() {
+        array.iter().collect::<Vec<_>>()
+    } else {
+        vec![tool_calls_value]
+    };
+    let tool_calls_count = tool_calls.len();
+    let Some(first_tool_call) = tool_calls.first().and_then(|entry| entry.as_object()) else {
+        return GeminiToolDetails {
+            tool_calls_count,
+            ..GeminiToolDetails::default()
+        };
+    };
+
+    let tool_name = extract_string(
+        first_tool_call,
+        &["name", "toolName", "tool", "functionName"],
+    );
+    let tool_call_id = extract_string(
+        first_tool_call,
+        &["id", "toolCallId", "tool_call_id", "callId"],
+    );
+    let tool_arguments_json = extract_object_value(
+        first_tool_call,
+        &[
+            "arguments",
+            "args",
+            "input",
+            "params",
+            "parameters",
+            "functionArgs",
+        ],
+    )
+    .and_then(|value| serde_json::to_string(value).ok());
+    let tool_result_text = extract_object_value(
+        first_tool_call,
+        &[
+            "result",
+            "response",
+            "output",
+            "toolResult",
+            "tool_result",
+            "content",
+        ],
+    )
+    .and_then(content::extract_text);
+
+    GeminiToolDetails {
+        tool_name,
+        tool_call_id,
+        tool_arguments_json,
+        tool_result_text,
+        tool_calls_count,
+    }
+}
+
+fn extract_object_value<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<&'a Value> {
+    keys.iter().find_map(|key| object.get(*key))
 }
