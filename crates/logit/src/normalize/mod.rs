@@ -577,7 +577,10 @@ fn content_key(content: Option<&str>) -> String {
 }
 
 fn adapter_supported_for_v1(adapter: AdapterKind) -> bool {
-    matches!(adapter, AdapterKind::Codex | AdapterKind::Claude)
+    matches!(
+        adapter,
+        AdapterKind::Codex | AdapterKind::Claude | AdapterKind::Gemini | AdapterKind::Amp
+    )
 }
 
 fn resolve_candidate_path(
@@ -618,12 +621,41 @@ fn collect_parseable_files_resolved(
     let mut files = Vec::new();
     collect_dir_files(resolved, source.recursive, &mut files)?;
     files.sort();
-    files.retain(|path| {
-        path.extension()
-            .and_then(std::ffi::OsStr::to_str)
-            .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "jsonl" | "ndjson"))
-    });
+    files.retain(|path| is_parseable_source_file(path, source));
     Ok(files)
+}
+
+fn is_parseable_source_file(path: &Path, source: &PrioritizedSource) -> bool {
+    let extension = path
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(str::to_ascii_lowercase);
+    let amp_file_changes_source =
+        source.adapter == AdapterKind::Amp && source.path.contains("/.amp/file-changes");
+
+    match source.adapter {
+        AdapterKind::Codex | AdapterKind::Claude => {
+            matches!(extension.as_deref(), Some("jsonl") | Some("ndjson"))
+        }
+        AdapterKind::Gemini => matches!(
+            extension.as_deref(),
+            Some("json") | Some("jsonl") | Some("ndjson")
+        ),
+        AdapterKind::Amp => {
+            if amp_file_changes_source {
+                true
+            } else {
+                matches!(
+                    extension.as_deref(),
+                    Some("json") | Some("jsonl") | Some("ndjson")
+                )
+            }
+        }
+        AdapterKind::OpenCode => matches!(
+            extension.as_deref(),
+            Some("json") | Some("jsonl") | Some("ndjson")
+        ),
+    }
 }
 
 fn collect_dir_files(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> Result<()> {
@@ -666,7 +698,44 @@ fn parse_supported_source_file(
             let parsed = crate::adapters::claude::parse_project_session_file(path, run_id)?;
             Ok((parsed.events, parsed.warnings))
         }
-        AdapterKind::Gemini | AdapterKind::Amp | AdapterKind::OpenCode => Ok((
+        AdapterKind::Gemini => {
+            let file_name = path
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let source_path = path.to_string_lossy();
+            if file_name == "logs.json" {
+                let parsed = crate::adapters::gemini::parse_logs_file(path, run_id)?;
+                return Ok((parsed.events, parsed.warnings));
+            }
+            if source_path.contains("/chats/") || file_name.starts_with("session-") {
+                let parsed = crate::adapters::gemini::parse_chat_session_file(path, run_id)?;
+                return Ok((parsed.events, parsed.warnings));
+            }
+            Ok((
+                Vec::new(),
+                vec![format!(
+                    "adapter `gemini` skipped unsupported source file shape in normalize orchestrator: {}",
+                    path.display()
+                )],
+            ))
+        }
+        AdapterKind::Amp => {
+            let source_path = path.to_string_lossy();
+            if source_path.contains("/file-changes/") || source_path.ends_with("/file-changes") {
+                let parsed = crate::adapters::amp::parse_file_change_event_file(path, run_id)?;
+                return Ok((parsed.events, parsed.warnings));
+            }
+            Ok((
+                Vec::new(),
+                vec![format!(
+                    "adapter `amp` skipped unsupported source file shape in normalize orchestrator: {}",
+                    path.display()
+                )],
+            ))
+        }
+        AdapterKind::OpenCode => Ok((
             Vec::new(),
             vec![format!(
                 "adapter `{}` file parsing not yet implemented in normalize orchestrator: {}",

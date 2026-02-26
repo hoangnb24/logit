@@ -179,7 +179,7 @@ const GEMINI_CANDIDATES: [DiscoveryCandidate; 3] = [
     },
 ];
 
-const AMP_CANDIDATES: [DiscoveryCandidate; 3] = [
+const AMP_CANDIDATES: [DiscoveryCandidate; 4] = [
     DiscoveryCandidate {
         precedence: 10,
         path: "~/.amp/sessions",
@@ -199,6 +199,13 @@ const AMP_CANDIDATES: [DiscoveryCandidate; 3] = [
         path: "~/.amp/logs",
         role: DiscoveryPathRole::RuntimeDiagnostics,
         format_hint: SourceFormatHint::TextLog,
+        recursive: true,
+    },
+    DiscoveryCandidate {
+        precedence: 40,
+        path: "~/.amp/file-changes",
+        role: DiscoveryPathRole::SessionStore,
+        format_hint: SourceFormatHint::Directory,
         recursive: true,
     },
 ];
