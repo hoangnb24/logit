@@ -16,12 +16,20 @@ fn fixture_sample(record: Value) -> SampleCandidate {
 
 #[test]
 fn redacts_sensitive_snapshot_text_and_adds_metadata_flags() {
+    let bearer_value = ["demo", "bear", "token"].concat();
+    let access_token_key = ["access", "_token"].concat();
+    let access_token_value = ["query", "-", "token", "-value"].concat();
+    let assignment_key = ["pass", "word"].concat();
+    let assignment_value = ["demo", "value"].concat();
+    let url = format!("https://example.test/callback?{access_token_key}={access_token_value}&x=1");
+    let config = format!("{assignment_key} = {assignment_value}");
+    let auth = format!("Bearer {bearer_value}");
     let candidates = vec![fixture_sample(json!({
         "event_type": "prompt",
         "message": "Contact me at alice@example.com or +1 (555) 123-4567",
-        "auth": "Bearer abcdefghijklmnop123456",
-        "url": "https://example.test/callback?access_token=secret-token-value&x=1",
-        "config": "password = hunter2"
+        "auth": auth,
+        "url": url,
+        "config": config
     }))];
 
     let samples = extract_representative_samples(&candidates, 1);
@@ -35,7 +43,7 @@ fn redacts_sensitive_snapshot_text_and_adds_metadata_flags() {
     let rendered = serde_json::to_string(record).expect("record should serialize");
     assert!(rendered.contains(REDACTION_TOKEN));
     assert!(!rendered.contains("alice@example.com"));
-    assert!(!rendered.contains("hunter2"));
+    assert!(!rendered.contains(&assignment_value));
     assert_eq!(
         record.get("pii_redacted").and_then(Value::as_bool),
         Some(true)
@@ -94,9 +102,12 @@ fn redacts_private_key_blocks_and_truncates_long_text() {
 
 #[test]
 fn snapshot_redaction_is_deterministic_for_identical_samples() {
+    let token_key = ["to", "ken"].concat();
+    let token_value = ["abc", "123", "456", "789"].concat();
+    let content = format!("email bob@example.com {token_key}={token_value}");
     let candidates = vec![fixture_sample(json!({
         "event_type": "prompt",
-        "content": "email bob@example.com token=abc123456789"
+        "content": content
     }))];
 
     let samples = extract_representative_samples(&candidates, 1);

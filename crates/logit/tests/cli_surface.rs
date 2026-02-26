@@ -28,12 +28,14 @@ fn parses_global_runtime_flags_for_snapshot() {
         Some(Path::new("/tmp/logit-out"))
     );
 
-    match cli.command {
-        Command::Snapshot(args) => {
-            assert_eq!(args.sample_size, 5);
-            assert!(args.source_root.is_none());
-        }
-        other => panic!("expected snapshot command, got {other:?}"),
+    assert!(
+        matches!(&cli.command, Command::Snapshot(_)),
+        "expected snapshot command, got {:?}",
+        cli.command
+    );
+    if let Command::Snapshot(args) = cli.command {
+        assert_eq!(args.sample_size, 5);
+        assert!(args.source_root.is_none());
     }
 }
 
@@ -41,12 +43,14 @@ fn parses_global_runtime_flags_for_snapshot() {
 fn parses_normalize_fail_fast_flag() {
     let cli = Cli::parse_from(["logit", "normalize", "--fail-fast"]);
 
-    match cli.command {
-        Command::Normalize(args) => {
-            assert!(args.fail_fast);
-            assert!(args.source_root.is_none());
-        }
-        other => panic!("expected normalize command, got {other:?}"),
+    assert!(
+        matches!(&cli.command, Command::Normalize(_)),
+        "expected normalize command, got {:?}",
+        cli.command
+    );
+    if let Command::Normalize(args) = cli.command {
+        assert!(args.fail_fast);
+        assert!(args.source_root.is_none());
     }
 }
 
@@ -54,12 +58,14 @@ fn parses_normalize_fail_fast_flag() {
 fn parses_inspect_json_flag() {
     let cli = Cli::parse_from(["logit", "inspect", "events.jsonl", "--json"]);
 
-    match cli.command {
-        Command::Inspect(args) => {
-            assert!(args.json);
-            assert_eq!(args.target, Path::new("events.jsonl"));
-        }
-        other => panic!("expected inspect command, got {other:?}"),
+    assert!(
+        matches!(&cli.command, Command::Inspect(_)),
+        "expected inspect command, got {:?}",
+        cli.command
+    );
+    if let Command::Inspect(args) = cli.command {
+        assert!(args.json);
+        assert_eq!(args.target, Path::new("events.jsonl"));
     }
 }
 
@@ -67,11 +73,13 @@ fn parses_inspect_json_flag() {
 fn parses_validate_strict_flag() {
     let cli = Cli::parse_from(["logit", "validate", "out/events.jsonl", "--strict"]);
 
-    match cli.command {
-        Command::Validate(args) => {
-            assert!(args.strict);
-            assert_eq!(args.input, Path::new("out/events.jsonl"));
-        }
-        other => panic!("expected validate command, got {other:?}"),
+    assert!(
+        matches!(&cli.command, Command::Validate(_)),
+        "expected validate command, got {:?}",
+        cli.command
+    );
+    if let Command::Validate(args) = cli.command {
+        assert!(args.strict);
+        assert_eq!(args.input, Path::new("out/events.jsonl"));
     }
 }

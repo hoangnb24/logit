@@ -661,25 +661,25 @@ cat ~/.opencode/sessions/latest.json
         let codex = scores
             .iter()
             .find(|score| score.adapter == AdapterKind::Codex)
-            .expect("codex score should exist");
-        assert_eq!(codex.score, 1);
+            .map(|score| score.score);
+        assert_eq!(codex, Some(1));
 
         let claude = scores
             .iter()
             .find(|score| score.adapter == AdapterKind::Claude)
-            .expect("claude score should exist");
-        assert_eq!(claude.score, 1);
+            .map(|score| score.score);
+        assert_eq!(claude, Some(1));
 
         let opencode = scores
             .iter()
             .find(|score| score.adapter == AdapterKind::OpenCode)
-            .expect("opencode score should exist");
-        assert_eq!(opencode.score, 1);
+            .map(|score| score.score);
+        assert_eq!(opencode, Some(1));
 
         let gemini = scores
             .iter()
             .find(|score| score.adapter == AdapterKind::Gemini)
-            .expect("gemini score should exist");
-        assert_eq!(gemini.score, 0);
+            .map(|score| score.score);
+        assert_eq!(gemini, Some(0));
     }
 }

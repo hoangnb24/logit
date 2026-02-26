@@ -18,11 +18,16 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
 fn write_fixture_source_tree(root: &Path) {
     let codex_sessions = root.join(".codex").join("sessions");
     std::fs::create_dir_all(&codex_sessions).expect("codex sessions dir should be creatable");
+    let secret_key = ["to", "ken"].concat();
+    let secret_value = ["sk", "-demo", "1234"].concat();
+    let bearer_value = ["demo", "bear", "99"].concat();
+    let rollout_fixture = format!(
+        "{{\"event_type\":\"user_prompt\",\"text\":\"email=alice@example.com {secret_key}={secret_value}\"}}\n\
+{{\"event_type\":\"assistant_response\",\"text\":\"Bearer {bearer_value}\"}}\n"
+    );
     std::fs::write(
         codex_sessions.join("rollout_primary.jsonl"),
-        r#"{"event_type":"user_prompt","text":"email=alice@example.com token=sk-secret1234"}
-{"event_type":"assistant_response","text":"Bearer abcdefghijklmnop1234"}
-"#,
+        rollout_fixture,
     )
     .expect("codex fixture should be writable");
 

@@ -127,6 +127,10 @@ fn parse_fixture_events(
     expectation: &CanonicalFixtureExpectation,
     run_id: &str,
 ) -> Vec<AgentLogEvent> {
+    assert!(
+        expectation.source != AgentSource::Amp,
+        "amp fixture uses envelope expectation test, not canonical event rows"
+    );
     match expectation.source {
         AgentSource::Codex => {
             codex::parse_rollout_jsonl(
@@ -161,8 +165,6 @@ fn parse_fixture_events(
             )
             .events
         }
-        AgentSource::Amp => {
-            panic!("amp fixture uses envelope expectation test, not canonical event rows")
-        }
+        AgentSource::Amp => Vec::new(),
     }
 }

@@ -10,7 +10,21 @@ struct CanonicalFixtureExpectation {
     first_role: ActorRole,
 }
 
+fn is_known_canonical_fixture(name: &str) -> bool {
+    matches!(
+        name,
+        "codex_rollout_primary"
+            | "claude_project_session"
+            | "gemini_chat_messages"
+            | "opencode_runtime_prompt_history"
+    )
+}
+
 fn parse_canonical_fixture(name: &str, run_id: &str) -> Vec<AgentLogEvent> {
+    assert!(
+        is_known_canonical_fixture(name),
+        "unknown canonical fixture: {name}"
+    );
     match name {
         "codex_rollout_primary" => {
             codex::parse_rollout_jsonl(
@@ -45,11 +59,15 @@ fn parse_canonical_fixture(name: &str, run_id: &str) -> Vec<AgentLogEvent> {
             )
             .events
         }
-        _ => panic!("unknown canonical fixture: {name}"),
+        _ => Vec::new(),
     }
 }
 
 fn parse_canonical_fixture_warnings(name: &str, run_id: &str) -> Vec<String> {
+    assert!(
+        is_known_canonical_fixture(name),
+        "unknown canonical fixture: {name}"
+    );
     match name {
         "codex_rollout_primary" => {
             codex::parse_rollout_jsonl(
@@ -84,7 +102,7 @@ fn parse_canonical_fixture_warnings(name: &str, run_id: &str) -> Vec<String> {
             )
             .warnings
         }
-        _ => panic!("unknown canonical fixture: {name}"),
+        _ => Vec::new(),
     }
 }
 
@@ -143,9 +161,12 @@ fn fixture_corpus_canonical_expectation_table_is_stable() {
             expectation.name
         );
 
-        let first = events
-            .first()
-            .unwrap_or_else(|| panic!("missing first event for {}", expectation.name));
+        assert!(
+            !events.is_empty(),
+            "missing first event for {}",
+            expectation.name
+        );
+        let first = &events[0];
         assert_eq!(first.record_format, expectation.first_record_format);
         assert_eq!(first.event_type, expectation.first_event_type);
         assert_eq!(first.role, expectation.first_role);
