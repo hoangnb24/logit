@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::models::{
     ActorRole, AgentLogEvent, AgentSource, EventType, RecordFormat, TimestampQuality,
@@ -99,9 +99,13 @@ pub fn parse_rollout_jsonl(
             continue;
         };
 
-        let source_event_type =
-            extract_string(object.get("event_type")).unwrap_or_else(|| "unknown".to_string());
-        let (record_format, canonical_event_type, role) = classify_event_family(&source_event_type);
+        let payload = object.get("payload").and_then(Value::as_object);
+        let source_event_type = extract_string(object.get("event_type"))
+            .or_else(|| extract_string(object.get("type")))
+            .unwrap_or_else(|| "unknown".to_string());
+        let payload_type = payload.and_then(|payload| extract_string(payload.get("type")));
+        let (record_format, canonical_event_type, role) =
+            classify_rollout_event(&source_event_type, payload);
         if !is_known_rollout_event_type(&source_event_type) {
             warnings.push(format!(
                 "line {line_number}: unrecognized `event_type` `{source_event_type}`; mapped as diagnostic runtime event"
@@ -109,22 +113,72 @@ pub fn parse_rollout_jsonl(
         }
 
         let event_id = extract_string(object.get("event_id"))
-            .unwrap_or_else(|| format!("codex-line-{line_number:06}"));
-        let session_id = extract_string(object.get("session_id"));
-        let (content_text, content_source) = extract_rollout_content(object);
+            .or_else(|| payload.and_then(|payload| extract_string(payload.get("id"))))
+            .or_else(|| {
+                payload
+                    .and_then(|payload| extract_string(payload.get("call_id")))
+                    .map(|call_id| {
+                        let call_prefix = rollout_call_event_id_prefix(
+                            &source_event_type,
+                            payload_type.as_deref(),
+                        );
+                        format!(
+                            "codex-{call_prefix}-{:016x}-line-{line_number:06}-{call_id}",
+                            hash64(&source_path)
+                        )
+                    })
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "codex-rollout-{:016x}-line-{line_number:06}",
+                    hash64(&source_path)
+                )
+            });
+        let session_id = extract_string(object.get("session_id")).or_else(|| {
+            (source_event_type == "session_meta")
+                .then(|| {
+                    payload
+                        .and_then(|payload| extract_string(payload.get("id")))
+                        .unwrap_or_default()
+                })
+                .filter(|value| !value.is_empty())
+        });
+        let (mut content_text, content_source) =
+            extract_rollout_content(object, &source_event_type, payload);
         if matches!(record_format, RecordFormat::Message) && content_text.is_none() {
             warnings.push(format!(
                 "line {line_number}: missing message content text; emitting empty content"
             ));
         }
+        let tool_name = extract_string(object.get("tool_name"))
+            .or_else(|| payload.and_then(|payload| extract_string(payload.get("name"))));
+        let tool_call_id = extract_string(object.get("tool_call_id"))
+            .or_else(|| payload.and_then(|payload| extract_string(payload.get("call_id"))));
+        let tool_arguments_json = payload
+            .and_then(|payload| {
+                payload
+                    .get("arguments")
+                    .or_else(|| payload.get("input"))
+                    .cloned()
+            })
+            .and_then(|value| serde_json::to_string(&value).ok());
+        let tool_result_text = payload
+            .and_then(extract_payload_tool_output_text)
+            .or_else(|| extract_string(object.get("tool_result_text")));
+        if content_text.is_none() && matches!(record_format, RecordFormat::ToolResult) {
+            content_text = tool_result_text.clone();
+        }
         let content_excerpt = content_text
             .as_deref()
             .and_then(|text| content::derive_excerpt(text, content::DEFAULT_EXCERPT_MAX_CHARS));
-        let tool_name = extract_string(object.get("tool_name"));
         let exit_code = extract_i64(object.get("exit_code"));
 
+        let timestamp_hint = object
+            .get("created_at")
+            .or_else(|| object.get("timestamp"))
+            .or_else(|| payload.and_then(|payload| payload.get("timestamp")));
         let (timestamp_unix_ms, timestamp_utc, timestamp_quality) =
-            map_timestamp(object.get("created_at"), line_number, &mut warnings);
+            map_timestamp(timestamp_hint, line_number, &mut warnings);
 
         let raw_hash = format!("{:016x}", hash64(&trimmed));
         let canonical_hash = codex_conversation_hash(
@@ -148,6 +202,12 @@ pub fn parse_rollout_jsonl(
 
         let mut metadata = BTreeMap::new();
         metadata.insert("source_line".to_string(), serde_json::json!(line_number));
+        if let Some(source_type) = extract_string(object.get("type")) {
+            metadata.insert(
+                "codex_source_type".to_string(),
+                serde_json::json!(source_type),
+            );
+        }
         metadata.insert(
             "codex_event_type".to_string(),
             serde_json::json!(source_event_type),
@@ -163,6 +223,15 @@ pub fn parse_rollout_jsonl(
                 metadata.insert(
                     "codex_event_msg_name".to_string(),
                     serde_json::json!(suffix),
+                );
+            }
+            if source_event_type == "event_msg"
+                && let Some(payload_type) =
+                    payload.and_then(|payload| extract_string(payload.get("type")))
+            {
+                metadata.insert(
+                    "codex_event_msg_name".to_string(),
+                    serde_json::json!(payload_type),
                 );
             }
         }
@@ -206,9 +275,9 @@ pub fn parse_rollout_jsonl(
             content_excerpt,
             content_mime: Some("text/plain".to_string()),
             tool_name,
-            tool_call_id: None,
-            tool_arguments_json: None,
-            tool_result_text: None,
+            tool_call_id,
+            tool_arguments_json,
+            tool_result_text,
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
@@ -554,6 +623,98 @@ fn classify_event_family(source_event_type: &str) -> (RecordFormat, EventType, A
     }
 }
 
+fn classify_rollout_event(
+    source_event_type: &str,
+    payload: Option<&Map<String, Value>>,
+) -> (RecordFormat, EventType, ActorRole) {
+    match source_event_type {
+        "response_item" => match payload
+            .and_then(|payload| extract_string(payload.get("type")))
+            .as_deref()
+        {
+            Some("message") => classify_rollout_message_role(payload),
+            Some("function_call") | Some("custom_tool_call") => (
+                RecordFormat::ToolCall,
+                EventType::ToolInvocation,
+                ActorRole::Tool,
+            ),
+            Some("function_call_output") | Some("custom_tool_call_output") => (
+                RecordFormat::ToolResult,
+                EventType::ToolOutput,
+                ActorRole::Tool,
+            ),
+            Some("reasoning") => (
+                RecordFormat::System,
+                EventType::StatusUpdate,
+                ActorRole::Runtime,
+            ),
+            _ => (
+                RecordFormat::Diagnostic,
+                EventType::DebugLog,
+                ActorRole::Runtime,
+            ),
+        },
+        "event_msg" => match payload
+            .and_then(|payload| extract_string(payload.get("type")))
+            .as_deref()
+        {
+            Some("user_message") => (RecordFormat::Message, EventType::Prompt, ActorRole::User),
+            Some("agent_reasoning") => (
+                RecordFormat::System,
+                EventType::StatusUpdate,
+                ActorRole::Runtime,
+            ),
+            Some("token_count") => (
+                RecordFormat::Diagnostic,
+                EventType::Metric,
+                ActorRole::Runtime,
+            ),
+            _ => (
+                RecordFormat::System,
+                EventType::StatusUpdate,
+                ActorRole::Runtime,
+            ),
+        },
+        "session_meta" | "compacted" => (
+            RecordFormat::System,
+            EventType::SystemNotice,
+            ActorRole::Runtime,
+        ),
+        "turn_context" => (
+            RecordFormat::System,
+            EventType::StatusUpdate,
+            ActorRole::Runtime,
+        ),
+        _ => classify_event_family(source_event_type),
+    }
+}
+
+fn classify_rollout_message_role(
+    payload: Option<&Map<String, Value>>,
+) -> (RecordFormat, EventType, ActorRole) {
+    match payload
+        .and_then(|payload| extract_string(payload.get("role")))
+        .as_deref()
+    {
+        Some("user") => (RecordFormat::Message, EventType::Prompt, ActorRole::User),
+        Some("assistant") => (
+            RecordFormat::Message,
+            EventType::Response,
+            ActorRole::Assistant,
+        ),
+        Some("system") => (
+            RecordFormat::System,
+            EventType::SystemNotice,
+            ActorRole::System,
+        ),
+        _ => (
+            RecordFormat::Message,
+            EventType::Response,
+            ActorRole::Assistant,
+        ),
+    }
+}
+
 fn classify_event_msg_category(source_event_type: &str) -> Option<&'static str> {
     if !source_event_type.starts_with("event_msg") {
         return None;
@@ -569,9 +730,56 @@ fn classify_event_msg_category(source_event_type: &str) -> Option<&'static str> 
     }
 }
 
+fn rollout_call_event_id_prefix(
+    source_event_type: &str,
+    payload_type: Option<&str>,
+) -> &'static str {
+    match (source_event_type, payload_type) {
+        ("response_item", Some("function_call")) => "function-call",
+        ("response_item", Some("function_call_output")) => "function-call-output",
+        ("response_item", Some("custom_tool_call")) => "custom-tool-call",
+        ("response_item", Some("custom_tool_call_output")) => "custom-tool-call-output",
+        ("tool_result", _) => "tool-result",
+        _ => "tool-event",
+    }
+}
+
 fn extract_rollout_content(
     object: &serde_json::Map<String, Value>,
+    source_event_type: &str,
+    payload: Option<&Map<String, Value>>,
 ) -> (Option<String>, Option<&'static str>) {
+    if source_event_type == "response_item"
+        && let Some(payload) = payload
+    {
+        for (key, label) in [
+            ("content", "payload.content"),
+            ("summary", "payload.summary"),
+        ] {
+            if let Some(value) = payload.get(key)
+                && let Some(text) = content::extract_text(value)
+            {
+                return (Some(text), Some(label));
+            }
+        }
+    }
+
+    if source_event_type == "event_msg"
+        && let Some(payload) = payload
+    {
+        for (key, label) in [
+            ("message", "payload.message"),
+            ("text", "payload.text"),
+            ("delta", "payload.delta"),
+        ] {
+            if let Some(value) = payload.get(key)
+                && let Some(text) = content::extract_text(value)
+            {
+                return (Some(text), Some(label));
+            }
+        }
+    }
+
     for (key, label) in [
         ("text", "text"),
         ("message", "message"),
@@ -592,8 +800,33 @@ fn extract_rollout_content(
 fn is_known_rollout_event_type(source_event_type: &str) -> bool {
     matches!(
         source_event_type,
-        "user_prompt" | "assistant_response" | "tool_result"
+        "user_prompt"
+            | "assistant_response"
+            | "tool_result"
+            | "response_item"
+            | "event_msg"
+            | "turn_context"
+            | "session_meta"
+            | "compacted"
     ) || source_event_type.starts_with("event_msg")
+}
+
+fn extract_payload_tool_output_text(payload: &Map<String, Value>) -> Option<String> {
+    let output = payload.get("output")?;
+    match output {
+        Value::String(raw) => {
+            if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+                parsed
+                    .get("output")
+                    .and_then(content::extract_text)
+                    .or_else(|| content::extract_text(&parsed))
+                    .or_else(|| Some(raw.to_string()))
+            } else {
+                Some(raw.to_string())
+            }
+        }
+        _ => content::extract_text(output),
+    }
 }
 
 fn classify_history_role(

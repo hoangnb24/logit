@@ -81,6 +81,69 @@ fn maps_system_kind_to_system_notice() {
 }
 
 #[test]
+fn parses_modern_type_rows_and_tool_blocks() {
+    let input = concat!(
+        "{\"type\":\"assistant\",\"sessionId\":\"claude-s-modern\",\"uuid\":\"evt-tool-use\",\"timestamp\":\"2026-02-02T09:00:10Z\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-opus-4-5-thinking\",\"content\":[{\"type\":\"tool_use\",\"id\":\"Read-1\",\"name\":\"Read\",\"input\":{\"file_path\":\"/tmp/a.txt\"}}]}}\n",
+        "{\"type\":\"user\",\"sessionId\":\"claude-s-modern\",\"uuid\":\"evt-tool-result\",\"parentUuid\":\"evt-tool-use\",\"timestamp\":\"2026-02-02T09:00:11Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"Read-1\",\"content\":\"ok\",\"is_error\":false}]}}\n",
+        "{\"type\":\"assistant\",\"sessionId\":\"claude-s-modern\",\"uuid\":\"evt-text\",\"timestamp\":\"2026-02-02T09:00:12Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}]}}\n",
+    );
+    let result = parse_project_session_jsonl(input, "run-test", "inline-modern");
+
+    assert!(
+        result.warnings.is_empty(),
+        "unexpected warnings: {:?}",
+        result.warnings
+    );
+    assert_eq!(result.events.len(), 3);
+
+    assert_eq!(result.events[0].record_format, RecordFormat::ToolCall);
+    assert_eq!(result.events[0].event_type, EventType::ToolInvocation);
+    assert_eq!(result.events[0].role, ActorRole::Tool);
+    assert_eq!(
+        result.events[0].session_id.as_deref(),
+        Some("claude-s-modern")
+    );
+    assert_eq!(result.events[0].tool_name.as_deref(), Some("Read"));
+    assert_eq!(result.events[0].tool_call_id.as_deref(), Some("Read-1"));
+    assert!(
+        result.events[0]
+            .tool_arguments_json
+            .as_deref()
+            .is_some_and(|json| json.contains("file_path"))
+    );
+
+    assert_eq!(result.events[1].record_format, RecordFormat::ToolResult);
+    assert_eq!(result.events[1].event_type, EventType::ToolOutput);
+    assert_eq!(result.events[1].role, ActorRole::Tool);
+    assert_eq!(result.events[1].tool_call_id.as_deref(), Some("Read-1"));
+    assert_eq!(result.events[1].tool_result_text.as_deref(), Some("ok"));
+    assert_eq!(
+        result.events[1].parent_event_id.as_deref(),
+        Some("evt-tool-use")
+    );
+
+    assert_eq!(result.events[2].record_format, RecordFormat::Message);
+    assert_eq!(result.events[2].event_type, EventType::Response);
+    assert_eq!(result.events[2].role, ActorRole::Assistant);
+    assert_eq!(result.events[2].content_text.as_deref(), Some("Done."));
+}
+
+#[test]
+fn parses_file_history_snapshot_rows_as_artifact_references() {
+    let input = r#"{"type":"file-history-snapshot","messageId":"msg-1","sessionId":"claude-s-x","timestamp":"2026-02-02T09:00:10Z","snapshot":{"timestamp":"2026-02-02T09:00:10Z"}}"#;
+    let result = parse_project_session_jsonl(input, "run-test", "inline-snapshot");
+
+    assert!(result.warnings.is_empty());
+    assert_eq!(result.events.len(), 1);
+    assert_eq!(result.events[0].event_id, "msg-1");
+    assert_eq!(result.events[0].event_type, EventType::ArtifactReference);
+    assert_eq!(result.events[0].record_format, RecordFormat::System);
+    assert_eq!(result.events[0].role, ActorRole::Runtime);
+    assert_eq!(result.events[0].session_id.as_deref(), Some("claude-s-x"));
+    assert_eq!(result.events[0].timestamp_quality, TimestampQuality::Exact);
+}
+
+#[test]
 fn maps_core_project_session_kinds_to_canonical_families() {
     let input = concat!(
         "{\"kind\":\"user\",\"created_at\":\"2026-02-02T09:00:10Z\",\"text\":\"u\"}\n",

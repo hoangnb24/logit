@@ -19,6 +19,18 @@ pub struct ClaudeSessionParseResult {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ClaudeMessageDetails {
+    content_text: Option<String>,
+    role_hint: Option<String>,
+    model: Option<String>,
+    tool_name: Option<String>,
+    tool_call_id: Option<String>,
+    tool_arguments_json: Option<String>,
+    tool_result_text: Option<String>,
+    tool_result_is_error: bool,
+}
+
 pub fn parse_project_session_file(path: &Path, run_id: &str) -> Result<ClaudeSessionParseResult> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read claude project session file: {path:?}"))?;
@@ -78,16 +90,22 @@ pub fn parse_history_jsonl(
 
         let role_value = extract_string(object.get("role"))
             .or_else(|| extract_string(object.get("kind")))
+            .or_else(|| extract_string(object.get("type")))
             .unwrap_or_else(|| infer_history_role(object).to_string());
         let (record_format, canonical_event_type, role) =
             classify_history_role(&role_value, line_number, &mut warnings);
 
-        let event_id = extract_string(object.get("event_id"))
-            .or_else(|| extract_string(object.get("entry_id")))
-            .or_else(|| extract_string(object.get("id")))
-            .unwrap_or_else(|| format!("claude-history-line-{line_number:06}"));
-        let project_id = extract_string(object.get("project_id"));
-        let session_id = extract_string(object.get("session_id"));
+        let event_id = extract_event_identifier(object).unwrap_or_else(|| {
+            format!(
+                "claude-history-{:016x}-line-{line_number:06}",
+                hash64(&source_path)
+            )
+        });
+        let project_id = extract_string(object.get("project_id"))
+            .or_else(|| extract_string(object.get("projectId")))
+            .or_else(|| extract_string(object.get("cwd")));
+        let session_id = extract_string(object.get("session_id"))
+            .or_else(|| extract_string(object.get("sessionId")));
 
         let content_text = object
             .get("prompt")
@@ -103,11 +121,8 @@ pub fn parse_history_jsonl(
             .as_deref()
             .and_then(|text| content::derive_excerpt(text, content::DEFAULT_EXCERPT_MAX_CHARS));
 
-        let (timestamp_unix_ms, timestamp_utc, timestamp_quality) = map_timestamp(
-            object.get("created_at").or_else(|| object.get("timestamp")),
-            line_number,
-            &mut warnings,
-        );
+        let (timestamp_unix_ms, timestamp_utc, timestamp_quality) =
+            map_timestamp_from_fields(object, line_number, &mut warnings);
 
         let raw_hash = format!("{:016x}", hash64(&trimmed));
         let canonical_hash = format!(
@@ -229,9 +244,14 @@ pub fn parse_mcp_cache_debug_log(
         let (timestamp_unix_ms, timestamp_utc, timestamp_quality) = match timestamp_token {
             Some(token) => {
                 let timestamp_value = Value::String(token);
-                map_timestamp(Some(&timestamp_value), line_number, &mut warnings)
+                map_timestamp_value(
+                    Some(&timestamp_value),
+                    "timestamp",
+                    line_number,
+                    &mut warnings,
+                )
             }
-            None => map_timestamp(None, line_number, &mut warnings),
+            None => fallback_timestamp(line_number),
         };
 
         let raw_hash = format!("{:016x}", hash64(&trimmed));
@@ -367,8 +387,9 @@ pub fn parse_project_session_jsonl(
         let parent_session_id = extract_string(object.get("parent_session_id"));
         let subagent_session_id = extract_string(object.get("subagent_session_id"));
         if parent_session_id.is_some() || subagent_session_id.is_some() {
-            let source_role =
-                extract_string(object.get("role")).unwrap_or_else(|| "unknown".to_string());
+            let source_role = extract_string(object.get("role"))
+                .or_else(|| extract_string(object.get("type")))
+                .unwrap_or_else(|| "unknown".to_string());
             let (record_format, canonical_event_type, role) =
                 classify_subagent_role(&source_role, line_number, &mut warnings);
             if subagent_session_id.is_none() {
@@ -382,15 +403,18 @@ pub fn parse_project_session_jsonl(
                 ));
             }
 
-            let event_id = extract_string(object.get("event_id"))
-                .or_else(|| extract_string(object.get("trace_id")))
-                .unwrap_or_else(|| format!("claude-subagent-line-{line_number:06}"));
+            let event_id = extract_event_identifier(object).unwrap_or_else(|| {
+                format!(
+                    "claude-subagent-{:016x}-line-{line_number:06}",
+                    hash64(&source_path)
+                )
+            });
             let content_text = extract_conversation_content_text(object);
             let content_excerpt = content_text
                 .as_deref()
                 .and_then(|text| content::derive_excerpt(text, content::DEFAULT_EXCERPT_MAX_CHARS));
             let (timestamp_unix_ms, timestamp_utc, timestamp_quality) =
-                map_timestamp(object.get("created_at"), line_number, &mut warnings);
+                map_timestamp_from_fields(object, line_number, &mut warnings);
             let raw_hash = format!("{:016x}", hash64(&trimmed));
             let canonical_hash = format!(
                 "{:016x}",
@@ -446,7 +470,7 @@ pub fn parse_project_session_jsonl(
                 session_id: subagent_session_id,
                 conversation_id: parent_session_id,
                 turn_id: None,
-                parent_event_id: None,
+                parent_event_id: extract_parent_event_id(object),
                 actor_id: None,
                 actor_name: None,
                 provider: None,
@@ -479,23 +503,57 @@ pub fn parse_project_session_jsonl(
             continue;
         }
 
-        let source_kind =
-            extract_string(object.get("kind")).unwrap_or_else(|| "unknown".to_string());
-        let (record_format, canonical_event_type, role) =
-            classify_session_kind(&source_kind, line_number, &mut warnings);
+        let mut source_kind = extract_string(object.get("kind"))
+            .or_else(|| extract_string(object.get("type")))
+            .unwrap_or_else(|| "unknown".to_string());
+        source_kind.make_ascii_lowercase();
 
-        let event_id = extract_string(object.get("event_id"))
-            .unwrap_or_else(|| format!("claude-line-{line_number:06}"));
-        let project_id = extract_string(object.get("project_id"));
-        let session_id = extract_string(object.get("session_id"));
+        let mut message_details = extract_message_details(object);
+        if message_details.tool_result_text.is_none() {
+            message_details.tool_result_text =
+                object.get("toolUseResult").and_then(content::extract_text);
+        }
+        if message_details.tool_call_id.is_none() {
+            message_details.tool_call_id = extract_string(object.get("tool_call_id"));
+        }
 
-        let content_text = extract_conversation_content_text(object);
+        let role_hint =
+            extract_string(object.get("role")).or_else(|| message_details.role_hint.clone());
+        let (record_format, canonical_event_type, role) = classify_session_kind(
+            &source_kind,
+            role_hint.as_deref(),
+            &message_details,
+            line_number,
+            &mut warnings,
+        );
+
+        let event_id = extract_event_identifier(object)
+            .or_else(|| {
+                message_details
+                    .tool_call_id
+                    .as_ref()
+                    .map(|call_id| format!("claude-call-{call_id}"))
+            })
+            .unwrap_or_else(|| {
+                format!("claude-{:016x}-line-{line_number:06}", hash64(&source_path))
+            });
+        let project_id = extract_string(object.get("project_id"))
+            .or_else(|| extract_string(object.get("projectId")))
+            .or_else(|| extract_string(object.get("cwd")));
+        let session_id = extract_string(object.get("session_id"))
+            .or_else(|| extract_string(object.get("sessionId")));
+        let parent_event_id = extract_parent_event_id(object);
+
+        let mut content_text = message_details.content_text.clone();
+        if content_text.is_none() && matches!(record_format, RecordFormat::ToolResult) {
+            content_text = message_details.tool_result_text.clone();
+        }
         let content_excerpt = content_text
             .as_deref()
             .and_then(|text| content::derive_excerpt(text, content::DEFAULT_EXCERPT_MAX_CHARS));
 
         let (timestamp_unix_ms, timestamp_utc, timestamp_quality) =
-            map_timestamp(object.get("created_at"), line_number, &mut warnings);
+            map_timestamp_from_fields(object, line_number, &mut warnings);
 
         let raw_hash = format!("{:016x}", hash64(&trimmed));
         let canonical_hash = format!(
@@ -513,8 +571,22 @@ pub fn parse_project_session_jsonl(
         let mut metadata = BTreeMap::new();
         metadata.insert("source_line".to_string(), serde_json::json!(line_number));
         metadata.insert("claude_kind".to_string(), serde_json::json!(source_kind));
+        if let Some(source_type) = extract_string(object.get("type")) {
+            metadata.insert(
+                "claude_source_type".to_string(),
+                serde_json::json!(source_type),
+            );
+        }
         if let Some(project_id) = &project_id {
             metadata.insert("project_id".to_string(), serde_json::json!(project_id));
+        }
+        if message_details.tool_result_is_error {
+            metadata.insert("tool_result_is_error".to_string(), serde_json::json!(true));
+        }
+
+        let mut flags = Vec::new();
+        if message_details.tool_result_is_error {
+            flags.push("tool_error".to_string());
         }
 
         events.push(AgentLogEvent {
@@ -538,24 +610,26 @@ pub fn parse_project_session_jsonl(
             session_id,
             conversation_id: project_id,
             turn_id: None,
-            parent_event_id: None,
-            actor_id: None,
-            actor_name: None,
+            parent_event_id,
+            actor_id: extract_string(object.get("agentId")),
+            actor_name: extract_string(object.get("slug")),
             provider: None,
-            model: None,
+            model: message_details
+                .model
+                .or_else(|| extract_string(object.get("model"))),
             content_text,
             content_excerpt,
             content_mime: Some("text/plain".to_string()),
-            tool_name: None,
-            tool_call_id: None,
-            tool_arguments_json: None,
-            tool_result_text: None,
+            tool_name: message_details.tool_name,
+            tool_call_id: message_details.tool_call_id,
+            tool_arguments_json: message_details.tool_arguments_json,
+            tool_result_text: message_details.tool_result_text,
             input_tokens: None,
             output_tokens: None,
             total_tokens: None,
             cost_usd: None,
             tags: vec!["claude".to_string(), "project_session".to_string()],
-            flags: Vec::new(),
+            flags,
             pii_redacted: None,
             warnings: Vec::new(),
             errors: Vec::new(),
@@ -570,9 +644,27 @@ pub fn parse_project_session_jsonl(
 
 fn classify_session_kind(
     source_kind: &str,
+    role_hint: Option<&str>,
+    message_details: &ClaudeMessageDetails,
     line_number: usize,
     warnings: &mut Vec<String>,
 ) -> (RecordFormat, EventType, ActorRole) {
+    if message_details.tool_result_text.is_some() {
+        return (
+            RecordFormat::ToolResult,
+            EventType::ToolOutput,
+            ActorRole::Tool,
+        );
+    }
+
+    if message_details.tool_name.is_some() || message_details.tool_arguments_json.is_some() {
+        return (
+            RecordFormat::ToolCall,
+            EventType::ToolInvocation,
+            ActorRole::Tool,
+        );
+    }
+
     match source_kind {
         "user" => (RecordFormat::Message, EventType::Prompt, ActorRole::User),
         "assistant" => (
@@ -590,7 +682,17 @@ fn classify_session_kind(
             EventType::SystemNotice,
             ActorRole::System,
         ),
+        "file-history-snapshot" => (
+            RecordFormat::System,
+            EventType::ArtifactReference,
+            ActorRole::Runtime,
+        ),
         _ => {
+            if let Some(role_hint) = role_hint
+                && let Some(mapping) = classify_role_hint(role_hint)
+            {
+                return mapping;
+            }
             warnings.push(format!(
                 "line {line_number}: unknown `kind` value `{source_kind}`; mapped to diagnostic event"
             ));
@@ -708,7 +810,7 @@ fn extract_message_field_text(message_value: Option<&Value>) -> Option<String> {
 
     message_object
         .and_then(|object| object.get("content"))
-        .and_then(content::extract_text)
+        .and_then(extract_message_content_text)
         .or_else(|| {
             message_object
                 .and_then(|object| object.get("text"))
@@ -717,12 +819,169 @@ fn extract_message_field_text(message_value: Option<&Value>) -> Option<String> {
         .or_else(|| content::extract_text(message))
 }
 
-fn map_timestamp(
-    created_at: Option<&Value>,
+fn extract_message_content_text(content_value: &Value) -> Option<String> {
+    match content_value {
+        Value::Array(items) => {
+            let mut fragments = Vec::new();
+            for item in items {
+                let Some(item_object) = item.as_object() else {
+                    if let Some(text) = content::extract_text(item) {
+                        fragments.push(text);
+                    }
+                    continue;
+                };
+
+                let item_type = extract_string(item_object.get("type")).unwrap_or_default();
+                match item_type.as_str() {
+                    "tool_use" | "tool_result" => {}
+                    "text" => {
+                        if let Some(text) = item_object.get("text").and_then(content::extract_text)
+                        {
+                            fragments.push(text);
+                        }
+                    }
+                    "thinking" => {
+                        if let Some(text) =
+                            item_object.get("thinking").and_then(content::extract_text)
+                        {
+                            fragments.push(text);
+                        }
+                    }
+                    _ => {
+                        if let Some(text) = content::extract_text(item) {
+                            fragments.push(text);
+                        }
+                    }
+                }
+            }
+
+            if fragments.is_empty() {
+                None
+            } else {
+                Some(fragments.join("\n"))
+            }
+        }
+        _ => content::extract_text(content_value),
+    }
+}
+
+fn extract_message_details(object: &Map<String, Value>) -> ClaudeMessageDetails {
+    let mut details = ClaudeMessageDetails {
+        content_text: extract_conversation_content_text(object),
+        ..ClaudeMessageDetails::default()
+    };
+
+    let Some(message_object) = object.get("message").and_then(Value::as_object) else {
+        return details;
+    };
+
+    details.role_hint = extract_string(message_object.get("role"));
+    details.model = extract_string(message_object.get("model"));
+
+    let Some(content_items) = message_object.get("content").and_then(Value::as_array) else {
+        return details;
+    };
+
+    for item in content_items {
+        let Some(item_object) = item.as_object() else {
+            continue;
+        };
+
+        let item_type = extract_string(item_object.get("type")).unwrap_or_default();
+        match item_type.as_str() {
+            "tool_use" => {
+                if details.tool_call_id.is_none() {
+                    details.tool_call_id = extract_string(item_object.get("id"));
+                }
+                if details.tool_name.is_none() {
+                    details.tool_name = extract_string(item_object.get("name"));
+                }
+                if details.tool_arguments_json.is_none() {
+                    details.tool_arguments_json = item_object
+                        .get("input")
+                        .and_then(|input| serde_json::to_string(input).ok());
+                }
+            }
+            "tool_result" => {
+                if details.tool_call_id.is_none() {
+                    details.tool_call_id = extract_string(item_object.get("tool_use_id"));
+                }
+                if details.tool_result_text.is_none() {
+                    details.tool_result_text =
+                        item_object.get("content").and_then(content::extract_text);
+                }
+                details.tool_result_is_error |=
+                    extract_bool(item_object.get("is_error")).unwrap_or(false);
+            }
+            _ => {}
+        }
+    }
+
+    details
+}
+
+fn classify_role_hint(role_hint: &str) -> Option<(RecordFormat, EventType, ActorRole)> {
+    match role_hint.trim().to_ascii_lowercase().as_str() {
+        "user" => Some((RecordFormat::Message, EventType::Prompt, ActorRole::User)),
+        "assistant" => Some((
+            RecordFormat::Message,
+            EventType::Response,
+            ActorRole::Assistant,
+        )),
+        "system" => Some((
+            RecordFormat::System,
+            EventType::SystemNotice,
+            ActorRole::System,
+        )),
+        "runtime" | "progress" => Some((
+            RecordFormat::System,
+            EventType::StatusUpdate,
+            ActorRole::Runtime,
+        )),
+        _ => None,
+    }
+}
+
+fn map_timestamp_from_fields(
+    object: &Map<String, Value>,
     line_number: usize,
     warnings: &mut Vec<String>,
 ) -> (u64, String, TimestampQuality) {
-    if let Some(raw) = extract_string(created_at) {
+    if object.contains_key("created_at") {
+        return map_timestamp_value(
+            object.get("created_at"),
+            "created_at",
+            line_number,
+            warnings,
+        );
+    }
+    if object.contains_key("timestamp") {
+        return map_timestamp_value(object.get("timestamp"), "timestamp", line_number, warnings);
+    }
+    if let Some(snapshot) = object.get("snapshot").and_then(Value::as_object)
+        && snapshot.contains_key("timestamp")
+    {
+        return map_timestamp_value(
+            snapshot.get("timestamp"),
+            "snapshot.timestamp",
+            line_number,
+            warnings,
+        );
+    }
+
+    warnings.push(format!(
+        "line {line_number}: missing `created_at`/`timestamp`; using fallback timestamp"
+    ));
+    fallback_timestamp(line_number)
+}
+
+fn map_timestamp_value(
+    value: Option<&Value>,
+    field_name: &str,
+    line_number: usize,
+    warnings: &mut Vec<String>,
+) -> (u64, String, TimestampQuality) {
+    if let Some(raw) = extract_string(value) {
         match normalize_timestamp_exact(&raw) {
             Ok(normalized) => {
                 return (
@@ -733,22 +992,42 @@ fn map_timestamp(
             }
             Err(error) => {
                 warnings.push(format!(
-                    "line {line_number}: invalid `created_at` value ({error}); using fallback timestamp"
+                    "line {line_number}: invalid `{field_name}` value ({error}); using fallback timestamp"
                 ));
             }
         }
     } else {
         warnings.push(format!(
-            "line {line_number}: missing `created_at`; using fallback timestamp"
+            "line {line_number}: missing `{field_name}`; using fallback timestamp"
         ));
     }
 
-    let fallback_unix_ms = line_number as u64;
-    (
-        fallback_unix_ms,
-        format_unix_ms(fallback_unix_ms),
-        TimestampQuality::Fallback,
-    )
+    fallback_timestamp(line_number)
+}
+
+fn fallback_timestamp(line_number: usize) -> (u64, String, TimestampQuality) {
+    let unix_ms = line_number as u64;
+    (unix_ms, format_unix_ms(unix_ms), TimestampQuality::Fallback)
+}
+
+fn extract_event_identifier(object: &Map<String, Value>) -> Option<String> {
+    extract_string(object.get("event_id"))
+        .or_else(|| extract_string(object.get("entry_id")))
+        .or_else(|| extract_string(object.get("trace_id")))
+        .or_else(|| extract_string(object.get("id")))
+        .or_else(|| extract_string(object.get("uuid")))
+        .or_else(|| extract_string(object.get("messageId")))
+}
+
+fn extract_parent_event_id(object: &Map<String, Value>) -> Option<String> {
+    extract_string(object.get("parent_event_id"))
+        .or_else(|| extract_string(object.get("parentUuid")))
+        .or_else(|| extract_string(object.get("parent_uuid")))
+        .or_else(|| extract_string(object.get("sourceToolAssistantUUID")))
+}
+
+fn extract_bool(value: Option<&Value>) -> Option<bool> {
+    value.and_then(Value::as_bool)
 }
 
 fn extract_string(value: Option<&Value>) -> Option<String> {
