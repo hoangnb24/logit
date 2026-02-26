@@ -19,6 +19,8 @@ Every normalized event must emit:
 - `timestamp_unix_ms` (u64-equivalent epoch milliseconds)
 - `timestamp_quality` (`exact` | `derived` | `fallback`)
 
+For analytics, `timestamp_unix_ms` is the canonical sort/aggregation clock; `timestamp_utc` is its stable human-readable rendering.
+
 ## 3. Accepted Input Timestamp Shapes
 
 v1 parser support:
@@ -108,7 +110,20 @@ Implementations must preserve timestamp provenance in metadata:
 
 This metadata supports debugging and validator explainability.
 
-## 10. Compatibility
+## 10.1 Usage/Performance Semantics
+
+When building usage/performance metrics from normalized events:
+- treat `timestamp_quality` as a confidence signal, not just a parse detail
+- preserve quality segmentation (`exact`, `derived`, `fallback`) in query/report outputs
+- avoid mixing fallback-heavy cohorts with exact-only cohorts without explicit labeling
+- use the global comparator from §7 before any duration or latency derivation
+
+Recommended report dimensions:
+- event counts by `timestamp_quality`
+- percentage of fallback timestamps per adapter/session
+- warning rates for malformed timestamp inputs
+
+## 11. Compatibility
 
 - This contract is `agentlog.v1` behavior.
 - Changing priority order, unit inference, or comparator keys is a breaking semantic change and requires version bump documentation.

@@ -258,4 +258,133 @@ Include:
 - `validate/report.json` (if validation issue)
 - minimal offending source file sample (redacted if needed)
 
+## 9. Query SQL Diagnostics and Answerability Recovery
+
+This section is for `logit query sql` troubleshooting once the SQLite mart workflow is in use.
+
+### 9.1 Preflight Before Blaming SQL
+
+1. Confirm the mart exists for the runtime path context:
+
+```bash
+ls -la "$OUT_DIR/mart.sqlite"
+```
+
+2. If missing (or suspiciously stale), run:
+
+```bash
+logit ingest refresh
+```
+
+3. Re-run the query with a conservative cap first:
+
+```bash
+logit query sql "SELECT 1 AS ok" --row-cap 10
+```
+
+If this succeeds, the query surface and mart path are healthy; the issue is likely SQL shape, params, or data expectations.
+
+### 9.2 Query Error Envelopes: Common Codes and Actions
+
+`query sql` returns JSON-only error envelopes. Check `error.code` first.
+
+- `sql_guardrail_violation`
+  - Cause: non-read-only SQL, unsupported statement form, or multi-statement payload.
+  - Action: use exactly one statement and restrict to:
+    - `SELECT ...`
+    - `WITH ... SELECT ...`
+    - `EXPLAIN SELECT ...`
+    - `EXPLAIN QUERY PLAN SELECT ...`
+  - Inspect `error.details.violation.reason` for `empty_statement`, `multi_statement`, `mutating_statement`, or `unsupported_statement`.
+
+- `query_row_cap_invalid`
+  - Cause: `--row-cap 0` (or otherwise invalid cap).
+  - Action: use a positive integer (`--row-cap 200` is a good autonomous default).
+
+- `query_params_invalid`
+  - Cause: `--params` is not valid JSON or contains non-scalar entries.
+  - Action: use scalar JSON (`42`, `"abc"`, `true`, `null`) or an array of scalars (`[1,"x",true]`).
+
+- `query_mart_unavailable`
+  - Cause: SQLite mart cannot be opened at the resolved `out_dir`.
+  - Action: verify runtime paths and run `logit ingest refresh` to materialize `mart.sqlite`.
+
+- `query_execution_failed`
+  - Cause: SQL prepared/executed but failed at runtime (missing table/view/column, SQL syntax, type issue).
+  - Action:
+    1. Read `error.details.cause`.
+    2. Reduce query to a minimal `SELECT` to isolate the failing expression.
+    3. Use `EXPLAIN QUERY PLAN` on the simplified query after syntax is fixed.
+
+### 9.3 Slow or Truncated Answers: Use `meta` Diagnostics
+
+On success, inspect:
+- `meta.duration_ms`
+- `meta.truncated`
+- `meta.row_cap`
+- `meta.params_count`
+- `meta.diagnostics.latency_bucket`
+- `meta.diagnostics.likely_full_scan`
+- `meta.diagnostics.truncation_reason`
+- `meta.diagnostics.statement_kind`
+
+#### If `meta.truncated=true`
+
+Do this in order:
+1. Narrow the time window (`WHERE ... timestamp ...`).
+2. Reduce selected columns.
+3. Aggregate earlier (`GROUP BY`) instead of returning raw rows.
+4. Add deterministic ordering + `LIMIT`.
+5. Only then raise `--row-cap`.
+
+Why:
+- v1 defaults prefer predictable latency/memory behavior over unbounded result sets.
+
+#### If `duration_ms` is high or `latency_bucket` is `slow` / `very_slow`
+
+1. Re-run with `EXPLAIN QUERY PLAN` to inspect access path shape.
+2. Check `meta.diagnostics.likely_full_scan`; if `true`, add predicates or tighter limits.
+3. Prefer semantic views (`v_tool_calls`, `v_sessions`, `v_adapters`, `v_quality`) over raw wide-table scans where possible.
+4. Parameterize repeated templates with `--params` to keep SQL stable while changing filters.
+
+### 9.4 Freshness and Reliability Questions: Query the Right Tables
+
+When an agent asks "is this data fresh?" or "can I trust this analysis?", answer from ingest metadata first.
+
+Useful tables:
+- `ingest_runs` (run history/status/counters)
+- `ingest_watermarks` (source-level freshness + staleness)
+
+Quick checks:
+
+```bash
+# Most recent ingest runs
+logit query sql "SELECT ingest_run_id, status, started_at_utc, finished_at_utc, events_written, warnings_count, errors_count
+FROM ingest_runs
+ORDER BY started_at_utc DESC, ingest_run_id DESC
+LIMIT 10" --row-cap 50
+
+# Current stale sources
+logit query sql "SELECT source_key, source_kind, staleness_state, refreshed_at_utc
+FROM ingest_watermarks
+WHERE staleness_state != 'fresh'
+ORDER BY refreshed_at_utc ASC, source_key ASC" --row-cap 200
+```
+
+Interpretation guidance:
+- recent `partial_failure` / `failed` runs can invalidate downstream confidence even if SQL executes successfully
+- `stale` watermarks mean answers may be structurally correct but operationally outdated
+- elevated `warnings_count` / `errors_count` can indicate degraded reliability for trend or quality analyses
+
+### 9.5 Agent Recovery Pattern When an Answer Is "Not Yet Good Enough"
+
+If a first-pass query fails answerability:
+1. Preserve the original user question verbatim.
+2. Record the failed query + envelope (`error.code` or `meta` diagnostics).
+3. Rephrase into a narrower sub-question (time window, adapter, session, or tool scope).
+4. Re-run with a smaller `--row-cap`.
+5. If still slow/truncated, switch to an aggregate/summary query first, then drill into one segment.
+
+This keeps agent loops deterministic and avoids repeatedly widening query cost before basic shape correctness is confirmed.
+
 This keeps follow-up deterministic and reproducible for the next agent.

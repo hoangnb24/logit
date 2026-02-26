@@ -1,0 +1,245 @@
+{
+  "schema_version": "logit.answerability-corpus.v1",
+  "corpus_id": "canonical-user-question-corpus-v1",
+  "generated_at_utc": "2026-02-26T00:00:00Z",
+  "all_data_synthetic": true,
+  "domains": [
+    "usage",
+    "performance",
+    "freshness",
+    "reliability"
+  ],
+  "questions": [
+    {
+      "id": "q-usage-001",
+      "domain": "usage",
+      "question": "Which tools are invoked most frequently in the last 7 days?",
+      "expected_answer_contract": {
+        "answer_kind": "ranked_list",
+        "must_include": ["tool_name", "invocation_count"],
+        "ordering": "invocation_count_desc"
+      },
+      "queryability_assumptions": [
+        "tool invocation events are queryable",
+        "time filtering by event timestamp is available"
+      ],
+      "rationale": "Validates baseline ability to answer operational tool-adoption questions."
+    },
+    {
+      "id": "q-usage-002",
+      "domain": "usage",
+      "question": "How many unique sessions were active each day over the last 14 days?",
+      "expected_answer_contract": {
+        "answer_kind": "time_series",
+        "must_include": ["day_utc", "unique_sessions"],
+        "ordering": "day_utc_asc"
+      },
+      "queryability_assumptions": [
+        "session identity is preserved in queryable storage",
+        "date bucketing is supported"
+      ],
+      "rationale": "Checks session grouping semantics and trend reporting."
+    },
+    {
+      "id": "q-usage-003",
+      "domain": "usage",
+      "question": "What is the distribution of event volume by adapter for the current workspace?",
+      "expected_answer_contract": {
+        "answer_kind": "distribution",
+        "must_include": ["adapter_name", "event_count", "event_share_pct"]
+      },
+      "queryability_assumptions": [
+        "adapter attribution is preserved per event",
+        "aggregate counts and percentages can be computed"
+      ],
+      "rationale": "Ensures adapter attribution supports cross-source usage analysis."
+    },
+    {
+      "id": "q-usage-004",
+      "domain": "usage",
+      "question": "Which conversations contain the highest number of tool calls?",
+      "expected_answer_contract": {
+        "answer_kind": "ranked_list",
+        "must_include": ["conversation_id", "tool_call_count"],
+        "ordering": "tool_call_count_desc"
+      },
+      "queryability_assumptions": [
+        "conversation grouping fields are queryable",
+        "tool call records are distinguishable from other records"
+      ],
+      "rationale": "Validates conversation-level aggregation needed for workflow diagnostics."
+    },
+    {
+      "id": "q-performance-001",
+      "domain": "performance",
+      "question": "What are p50/p95 tool execution durations by tool over the last 24 hours?",
+      "expected_answer_contract": {
+        "answer_kind": "table",
+        "must_include": ["tool_name", "p50_duration_ms", "p95_duration_ms"]
+      },
+      "queryability_assumptions": [
+        "tool duration metrics are materialized with provenance",
+        "percentile aggregation is available"
+      ],
+      "rationale": "Targets latency hotspot identification for common tooling."
+    },
+    {
+      "id": "q-performance-002",
+      "domain": "performance",
+      "question": "Which sessions have the highest cumulative tool execution time?",
+      "expected_answer_contract": {
+        "answer_kind": "ranked_list",
+        "must_include": ["session_id", "total_tool_duration_ms"],
+        "ordering": "total_tool_duration_ms_desc"
+      },
+      "queryability_assumptions": [
+        "session ids are stable",
+        "durations are additive with consistent units"
+      ],
+      "rationale": "Checks roll-up performance analysis at session granularity."
+    },
+    {
+      "id": "q-performance-003",
+      "domain": "performance",
+      "question": "What percentage of tool calls exceed a 2 second latency threshold by adapter?",
+      "expected_answer_contract": {
+        "answer_kind": "distribution",
+        "must_include": ["adapter_name", "slow_call_pct"],
+        "threshold": "duration_ms > 2000"
+      },
+      "queryability_assumptions": [
+        "duration fields are queryable by adapter",
+        "conditional aggregation is supported"
+      ],
+      "rationale": "Measures adapter-level performance reliability under a fixed SLO-style threshold."
+    },
+    {
+      "id": "q-performance-004",
+      "domain": "performance",
+      "question": "How does median tool latency trend by hour for the top 3 most-used tools?",
+      "expected_answer_contract": {
+        "answer_kind": "time_series",
+        "must_include": ["hour_utc", "tool_name", "median_duration_ms"],
+        "ordering": "hour_utc_asc"
+      },
+      "queryability_assumptions": [
+        "hourly bucketing by timestamp is available",
+        "top-N tools can be determined from usage counts"
+      ],
+      "rationale": "Verifies compound analytics combining usage ranking and latency trends."
+    },
+    {
+      "id": "q-freshness-001",
+      "domain": "freshness",
+      "question": "When did each source kind last refresh successfully?",
+      "expected_answer_contract": {
+        "answer_kind": "table",
+        "must_include": ["source_kind", "last_successful_refresh_at_utc"]
+      },
+      "queryability_assumptions": [
+        "ingest run metadata is queryable",
+        "source-level freshness metadata exists"
+      ],
+      "rationale": "Directly validates freshness introspection per source family."
+    },
+    {
+      "id": "q-freshness-002",
+      "domain": "freshness",
+      "question": "Which sources are currently marked stale and by how much?",
+      "expected_answer_contract": {
+        "answer_kind": "table",
+        "must_include": ["source_key", "staleness_state", "staleness_age_ms"]
+      },
+      "queryability_assumptions": [
+        "watermark staleness state is materialized",
+        "age can be derived from refreshed timestamps"
+      ],
+      "rationale": "Confirms the system can surface stale inputs before analysis."
+    },
+    {
+      "id": "q-freshness-003",
+      "domain": "freshness",
+      "question": "What is the refresh success rate over the last 30 ingest runs?",
+      "expected_answer_contract": {
+        "answer_kind": "scalar",
+        "must_include": ["refresh_success_rate_pct"]
+      },
+      "queryability_assumptions": [
+        "ingest run status history is retained",
+        "windowed success-rate computation is possible"
+      ],
+      "rationale": "Checks operational stability of ingest lifecycle over recent history."
+    },
+    {
+      "id": "q-freshness-004",
+      "domain": "freshness",
+      "question": "How many queryable events were written in the most recent successful refresh?",
+      "expected_answer_contract": {
+        "answer_kind": "scalar",
+        "must_include": ["events_written"]
+      },
+      "queryability_assumptions": [
+        "latest successful ingest run can be identified deterministically",
+        "run-level event counts are tracked"
+      ],
+      "rationale": "Validates minimal freshness-volume diagnostics for operators."
+    },
+    {
+      "id": "q-reliability-001",
+      "domain": "reliability",
+      "question": "What are the top warning categories emitted during normalization in the last 7 days?",
+      "expected_answer_contract": {
+        "answer_kind": "ranked_list",
+        "must_include": ["warning_category", "warning_count"],
+        "ordering": "warning_count_desc"
+      },
+      "queryability_assumptions": [
+        "warning metadata is preserved in queryable rows",
+        "categorization/grouping on warning payloads is supported"
+      ],
+      "rationale": "Surfaces recurrent quality issues affecting trust in outputs."
+    },
+    {
+      "id": "q-reliability-002",
+      "domain": "reliability",
+      "question": "How many records have fallback timestamp quality by adapter?",
+      "expected_answer_contract": {
+        "answer_kind": "distribution",
+        "must_include": ["adapter_name", "fallback_timestamp_count"]
+      },
+      "queryability_assumptions": [
+        "timestamp quality markers survive materialization",
+        "adapter-level grouping is supported"
+      ],
+      "rationale": "Checks temporal data quality and reliability by source."
+    },
+    {
+      "id": "q-reliability-003",
+      "domain": "reliability",
+      "question": "Are there duplicate canonical hashes in the latest ingest window?",
+      "expected_answer_contract": {
+        "answer_kind": "boolean",
+        "must_include": ["has_duplicate_canonical_hashes", "duplicate_count"]
+      },
+      "queryability_assumptions": [
+        "canonical hash is queryable",
+        "dedupe diagnostics can be expressed in SQL results"
+      ],
+      "rationale": "Validates integrity and idempotency expectations."
+    },
+    {
+      "id": "q-reliability-004",
+      "domain": "reliability",
+      "question": "What fraction of ingest runs ended in failed or partial_failure states?",
+      "expected_answer_contract": {
+        "answer_kind": "scalar",
+        "must_include": ["degraded_run_fraction_pct"]
+      },
+      "queryability_assumptions": [
+        "ingest run statuses are persisted",
+        "status-based fraction computation is supported"
+      ],
+      "rationale": "Provides an operational reliability KPI for release gating."
+    }
+  ]
+}

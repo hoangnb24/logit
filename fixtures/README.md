@@ -23,3 +23,4 @@ This directory holds deterministic, synthetic fixture data for `logit`.
 - `fixtures/gemini`
 - `fixtures/amp`
 - `fixtures/opencode`
+- `fixtures/benchmarks`

@@ -14,6 +14,7 @@ Current implementation includes:
 - Normalize orchestration + artifact emission (`events.jsonl`, `agentlog.v1.schema.json`, `stats.json`)
 - Validation report artifact emission (`validate/report.json`) with strict/baseline modes
 - Optional SQLite schema/writer/parity support
+- V1 agent-query data plane baseline contract (`docs/agent-query-data-plane-v1-contract.md`)
 
 ## Requirements
 
@@ -125,6 +126,88 @@ Behavior:
 - baseline inspect command surface for read-only introspection entrypoint
 - validates CLI parsing and target selection (`--json` output mode toggle)
 
+### `ingest refresh`
+
+```bash
+logit ingest refresh
+```
+
+Behavior:
+- materializes normalized `events.jsonl` into local SQLite mart (`mart.sqlite`)
+- emits JSON envelope output only (success and failure paths)
+- writes ingest report artifact at `<out_dir>/ingest/report.json`
+
+### `query sql`
+
+```bash
+logit query sql "select event_type, count(*) as n from agentlog_events group by event_type"
+```
+
+Behavior:
+- executes a single read-only SQL statement against the local mart
+- enforces read-only guardrails (`SELECT`, `WITH ... SELECT`, `EXPLAIN ... SELECT`)
+- returns JSON envelope with runtime metadata (`duration_ms`, `row_count`, `truncated`, `row_cap`, `params_count`)
+
+Defaults and operator knobs:
+- default `--row-cap` is `1000` (`--row-cap` must be greater than `0`)
+- `--params <JSON>` supports scalar or array bound parameters
+- tune for responsiveness by lowering `--row-cap` and narrowing SQL predicates before widening result scope
+
+SLO and tuning baseline:
+- canonical targets/defaults are defined in `docs/agent-query-data-plane-v1-contract.md` section 8.1
+
+### `query schema`
+
+```bash
+logit query schema
+```
+
+Behavior:
+- emits machine-readable table/view/column metadata for the local SQLite mart
+- supports agent query planning without hardcoded schema assumptions
+- use `--include-internal` to include internal schema objects (for debugging/migration inspection)
+
+### `query catalog`
+
+```bash
+logit query catalog
+```
+
+Behavior:
+- emits semantic catalog for agent-facing concepts (`tool_calls`, `sessions`, `adapters`, `quality`)
+- includes recommended dimensions/metrics and join guidance for exploratory analysis
+- use `--verbose` to include per-concept field catalogs
+
+### `query benchmark`
+
+```bash
+logit query benchmark --corpus fixtures/benchmarks/answerability_question_corpus_v1.json
+```
+
+Behavior:
+- executes the canonical answerability corpus deterministically across query interfaces (`query.sql` plans, plus schema/catalog preflight checks)
+- validates per-question result shape against `expected_answer_contract.must_include` (and ordering contracts when present)
+- emits JSON envelope output only, including per-question pass/fail and aggregate score summary
+- writes benchmark artifact at `<out_dir>/benchmarks/answerability_report_v1.json`
+
+Defaults and operator knobs:
+- default corpus path resolves relative to `--cwd`: `fixtures/benchmarks/answerability_question_corpus_v1.json`
+- default benchmark `--row-cap` is `200` (`--row-cap` must be greater than `0`)
+
+### Freshness and Stale-Data Expectations (Centralized Query Workflow)
+
+- `ingest refresh` is the only action that advances mart freshness in v1 (no background auto-refresh).
+- Query commands (`query sql`, `query schema`, `query catalog`, `query benchmark`) operate on the current local mart snapshot under `--out-dir`.
+- For freshness-sensitive answers or release sign-off:
+  - run `ingest refresh` first
+  - inspect ingest run/watermark metadata (`ingest/report.json`, `ingest_runs`, `ingest_watermarks`)
+  - record the freshness context alongside benchmark/query evidence
+
+Guardrail rationale:
+- `query sql` is intentionally read-only and single-statement to keep automation safe and deterministic.
+- bounded defaults (`--row-cap`) reduce latency and memory risk for unattended agent loops.
+- when results are truncated, prefer narrower predicates/time windows before raising caps.
+
 ## Exit Codes
 
 - `0`: success
@@ -149,6 +232,11 @@ If `--out-dir` is omitted, artifacts are written under `$HOME/.logit/output`:
   - `discovery/zsh_history_usage.json`
 - validate:
   - `validate/report.json`
+- ingest:
+  - `ingest/report.json`
+  - `mart.sqlite`
+- benchmark:
+  - `benchmarks/answerability_report_v1.json`
 
 ## Quality Gates
 
@@ -194,6 +282,11 @@ For failure-mode runbooks (discovery gaps, parse failures, validation diagnostic
 
 - `docs/troubleshooting-and-failure-cookbook.md`
 - `docs/cli-command-examples.md` (persona workflow recipes for debugger, analyst, maintainer)
+
+## Architecture Contracts
+
+- `docs/architecture-and-data-model.md` (current pipeline/module architecture)
+- `docs/agent-query-data-plane-v1-contract.md` (v1 ingest/query baseline decisions and non-goals)
 
 ## Release Readiness
 

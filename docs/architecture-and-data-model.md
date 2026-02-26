@@ -4,6 +4,7 @@ Status: canonical architecture overview for `bd-ubx`
 Related contracts:
 - `docs/agentlog-v1-contract.md`
 - `docs/agentlog-v1-field-optionality-matrix.md`
+- `docs/agent-query-data-plane-v1-contract.md`
 - `docs/controlled-vocabulary-contract.md`
 - `docs/dedupe-provenance-policy-contract.md`
 - `docs/privacy-defaults-contract.md`
@@ -39,6 +40,36 @@ Provides a read-only inspection entrypoint (baseline CLI surface).
 
 Optional persistence stage:
 - SQLite mirror + parity checks to support queryable local analytics while preserving canonical parity.
+
+### 2.1 Agent-Queryable Data Plane Baseline (V1)
+
+Contract baseline for ingest refresh + read-only query behavior is frozen in:
+- `docs/agent-query-data-plane-v1-contract.md`
+
+This baseline locks:
+- JSON-only command envelopes for ingest/query surfaces
+- manual-refresh freshness semantics with explicit watermark metadata
+- read-only query safety constraints
+- query operability defaults (`row_cap`) and SLO targets tied to envelope runtime metadata
+- explicit v1 non-goals (no live tailing/background refresh daemons)
+
+### 2.2 Query Operability Profile
+
+The v1 query surface is intentionally bounded and machine-operable:
+- default `query sql` row cap is `1000` (operator-tunable via `--row-cap`)
+- runtime metadata includes `duration_ms`, `row_count`, `truncated`, and `params_count` for adaptive automation decisions
+- release-gate responsiveness targets and tuning guidance are defined in `docs/agent-query-data-plane-v1-contract.md` section 8.1
+- `query benchmark` is the canonical answerability harness and emits machine-readable score artifacts for release review
+
+### 2.3 Freshness and Guardrail Rationale (Operator Lens)
+
+The centralized data plane intentionally favors deterministic safety over implicit convenience:
+- freshness is explicit and manual (`ingest refresh`), so operators always know which ingest run produced query answers
+- read-only SQL guardrails prevent accidental mutating statements in automation loops
+- bounded query defaults (`row_cap`) reduce tail-latency and memory risk for unattended agent workflows
+
+Operational implication:
+- if answers are freshness-sensitive, rerun `ingest refresh` before issuing release-signoff queries and record ingest evidence (`ingest_runs`, `ingest_watermarks`)
 
 ## 3. Module Boundaries
 
@@ -131,6 +162,11 @@ Expected artifacts:
   - `discovery/zsh_history_usage.json`
 - validate:
   - `validate/report.json`
+- ingest:
+  - `ingest/report.json`
+  - `mart.sqlite`
+- benchmark:
+  - `benchmarks/answerability_report_v1.json`
 
 These file/location guarantees are part of the run artifact topology contract.
 

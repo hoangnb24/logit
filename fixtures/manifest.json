@@ -117,6 +117,16 @@
           "tags": ["auxiliary", "runtime-log"]
         }
       ]
+    },
+    {
+      "name": "benchmarks",
+      "fixtures": [
+        {
+          "path": "fixtures/benchmarks/answerability_question_corpus_v1.json",
+          "kind": "json",
+          "tags": ["benchmarks", "question-corpus", "answerability", "v1"]
+        }
+      ]
     }
   ]
 }

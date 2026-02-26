@@ -12,6 +12,7 @@ Core guarantees:
 - explicit provenance for every emitted event
 - stable optionality semantics (no adapter-specific interpretation drift)
 - machine-checkable vocabularies for key classifier fields
+- analysis-ready semantics for tool identity, time quality, session grouping, and adapter attribution
 
 ## 2. Record Shape Rules
 
@@ -34,6 +35,18 @@ Every normalized record MUST satisfy:
 6. `timestamp_utc` and `timestamp_unix_ms` represent the same instant when both are present.
 7. `record_format`, `event_type`, and `role` MUST be members of their controlled vocabularies.
 8. Provenance trio (`source_kind`, `source_path`, `source_record_locator`) is always present.
+
+## 3.1 Usage/Performance Analysis Semantics Profile
+
+The fields below are the canonical analysis surface for v1 queries and derived metrics.
+
+| Analysis concern | Canonical fields | Normative semantics |
+|---|---|---|
+| Tool identity and pairing | `tool_name`, `tool_call_id`, `record_format`, `event_type` | Tool activity is identified by `tool_name`; call/result correlation uses `tool_call_id` when available. `tool_call_id` must not be emitted for non-tool records. |
+| Event time and reliability | `timestamp_unix_ms`, `timestamp_utc`, `timestamp_quality` | `timestamp_unix_ms` is the primary analytical clock; `timestamp_utc` is the canonical string rendering of the same instant. `timestamp_quality` communicates confidence (`exact` > `derived` > `fallback`) and must be preserved in downstream metrics. |
+| Session and conversation grouping | `conversation_id`, `session_id`, `turn_id`, `parent_event_id` | Prefer `conversation_id` for conversation-level aggregates; use `session_id` for runtime/session rollups; use `turn_id` and `parent_event_id` for local adjacency and thread structure when present. |
+| Adapter attribution and provenance | `source_kind`, `adapter_name`, `adapter_version`, `source_path`, `source_record_locator` | `source_kind` identifies artifact family; `adapter_name` identifies parser namespace. For v1, `adapter_name` and `source_kind` must resolve to the same canonical family. |
+| Quality markers | `timestamp_quality`, `warnings`, `errors`, `pii_redacted`, `flags` | Quality-sensitive analysis must account for degraded clocks and parser diagnostics. `warnings`/`errors` carry record-scoped quality signals; `pii_redacted` and `flags` indicate policy/runtime transforms that may affect interpretation. |
 
 ## 4. Controlled Vocabularies
 
@@ -83,21 +96,21 @@ Legend:
 | `run_id` | string | R | Identifier of normalize execution producing this record. | Non-empty UUID/opaque string. |
 | `sequence_global` | integer | R | Global deterministic sort index for output ordering. | Integer `>= 0`; unique per output file. |
 | `sequence_source` | integer | O | Source-local ordering index if available. | Integer `>= 0`. |
-| `source_kind` | string | R | High-level origin family of source data. | One of `codex`,`claude`,`gemini`,`amp`,`opencode`. |
+| `source_kind` | string | R | High-level origin family of source data; primary provenance partition key for cross-adapter analytics. | One of `codex`,`claude`,`gemini`,`amp`,`opencode`. |
 | `source_path` | string | R | Filesystem path to source artifact used for this record. | Non-empty path string. |
 | `source_record_locator` | string | R | Stable locator inside source artifact. | Example: `line:42`, `json_pointer:/events/3`. |
 | `source_record_hash` | string | O | Raw hash of source-record slice before canonical mapping. | Lowercase hex digest. |
-| `adapter_name` | string | R | Adapter emitting this record. | One of `codex`,`claude`,`gemini`,`amp`,`opencode`. |
+| `adapter_name` | string | R | Adapter namespace emitting this record; in v1 must align with `source_kind`. | One of `codex`,`claude`,`gemini`,`amp`,`opencode`. |
 | `adapter_version` | string | O | Adapter contract version used. | Semver string preferred. |
 | `record_format` | string | R | Structural class of normalized record. | Controlled vocabulary in §4.1. |
 | `event_type` | string | R | Semantic event classifier. | Controlled vocabulary in §4.2. |
 | `role` | string | R | Actor role for semantic attribution. | Controlled vocabulary in §4.3. |
 | `timestamp_utc` | string | R | Canonical event instant in UTC ISO-8601. | RFC 3339 UTC (`...Z`). |
 | `timestamp_unix_ms` | integer | R | Epoch milliseconds equivalent to `timestamp_utc`. | Integer `>= 0`. |
-| `timestamp_quality` | string | R | How timestamp confidence was derived. | One of `exact`,`derived`,`fallback`. |
-| `session_id` | string | O | Source session identifier. | Non-empty string. |
-| `conversation_id` | string | O | Conversation/thread identifier across events. | Non-empty string. |
-| `turn_id` | string | O | Turn/message grouping identifier. | Non-empty string. |
+| `timestamp_quality` | string | R | How timestamp confidence was derived; analytical quality marker for time-based metrics. | One of `exact`,`derived`,`fallback`. |
+| `session_id` | string | O | Source/runtime session identifier for session-level rollups. | Non-empty string. |
+| `conversation_id` | string | O | Conversation/thread identifier across events; preferred key for conversational grouping. | Non-empty string. |
+| `turn_id` | string | O | Turn/message grouping identifier for adjacency-level analytics. | Non-empty string. |
 | `parent_event_id` | string | O | Parent event relationship for threaded structures. | Must reference an existing `event_id` when present. |
 | `actor_id` | string | O | Stable actor identity if source provides it. | Non-empty string. |
 | `actor_name` | string | O | Human-readable actor label. | Non-empty UTF-8 string. |
@@ -106,8 +119,8 @@ Legend:
 | `content_text` | string | O | Full normalized textual content when policy permits retention. | UTF-8 text; may be omitted by policy. |
 | `content_excerpt` | string | O | Deterministic short excerpt for preview/diagnostics. | Max length policy-defined; no multiline normalization drift. |
 | `content_mime` | string | O | MIME-like descriptor for content payload. | Example: `text/plain`, `application/json`. |
-| `tool_name` | string | C | Tool identifier for tool records. | Required when `record_format` in `{tool_call,tool_result}`. |
-| `tool_call_id` | string | C | Stable tool-call correlation ID. | Required for `tool_call` and `tool_result` pairs when available. |
+| `tool_name` | string | C | Tool identifier for tool records; canonical dimension for tool usage metrics. | Required when `record_format` in `{tool_call,tool_result}`. |
+| `tool_call_id` | string | C | Stable tool-call correlation ID used to pair invocations and outputs. | Required for `tool_call` and `tool_result` pairs when available. |
 | `tool_arguments_json` | string | O | Canonical JSON string of tool arguments. | Must parse as JSON object/array if present. |
 | `tool_result_text` | string | C | Textual tool output summary/body. | Required when `record_format = tool_result` and text output exists. |
 | `input_tokens` | integer | O | Input/prompt token count from source/provider. | Integer `>= 0`. |
@@ -117,8 +130,8 @@ Legend:
 | `tags` | array<string> | O | Normalized labels for filtering/analytics. | Unique, lowercase slug tokens. |
 | `flags` | array<string> | O | Behavioral flags (quality/privacy/runtime). | Unique values; implementation-defined controlled list. |
 | `pii_redacted` | boolean | O | Indicates content was transformed by redaction policy. | `true` only when mutation happened. |
-| `warnings` | array<string> | O | Non-fatal normalization warnings. | Human-readable stable codes/messages. |
-| `errors` | array<string> | O | Record-scoped errors if partial-failure mode keeps record. | Stable codes/messages; empty when no errors. |
+| `warnings` | array<string> | O | Non-fatal normalization warnings; quality marker for downstream scoring/filtering. | Human-readable deterministic diagnostics for identical input. |
+| `errors` | array<string> | O | Record-scoped errors if partial-failure mode keeps record; severe quality marker. | Deterministic diagnostics for identical input; empty when no errors. |
 | `raw_hash` | string | R | Hash of raw source-record payload basis. | Lowercase hex digest. |
 | `canonical_hash` | string | R | Hash of canonical semantic payload basis for dedupe. | Lowercase hex digest. |
 | `metadata` | object | O | Extra adapter metadata not promoted to canonical top-level fields. | JSON object; keys must not shadow canonical fields. |
@@ -131,6 +144,8 @@ Legend:
 4. If both `input_tokens` and `output_tokens` are present, `total_tokens` MUST be absent or equal to their sum.
 5. If `pii_redacted = true`, then at least one of `content_text` or `content_excerpt` MUST exist and represent the redacted value.
 6. `warnings` and `errors` entries MUST be deterministic for identical source input.
+7. If `tool_call_id` is present, then `record_format` MUST be `tool_call` or `tool_result`.
+8. In v1, `adapter_name` MUST equal `source_kind`.
 
 ## 7. Optionality Semantics (Normative)
 
