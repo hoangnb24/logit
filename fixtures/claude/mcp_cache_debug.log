@@ -1,0 +1,2 @@
+2026-02-02T09:00:11Z DEBUG claude.mcp cache_lookup key=resource://thread/br-29y hit=true
+2026-02-02T09:00:12Z DEBUG claude.mcp cache_lookup key=resource://agents/project miss=false

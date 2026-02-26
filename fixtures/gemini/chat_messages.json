@@ -1,0 +1,15 @@
+{
+  "conversation_id": "gemini-c-001",
+  "messages": [
+    {
+      "role": "user",
+      "timestamp": "2026-02-03T08:30:00Z",
+      "content": [{"text": "Show me the diff summary."}]
+    },
+    {
+      "role": "model",
+      "timestamp": "2026-02-03T08:30:02Z",
+      "content": [{"text": "3 files changed, 48 insertions, 9 deletions."}]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "thread_id": "amp-t-bad",
+  "messages": [
+    {"id": "m-001", "role": "assistant", "created_at": null, "parts": "not-an-array"},
+    {"id": "m-002", "role": "user"}
+  ]
+}

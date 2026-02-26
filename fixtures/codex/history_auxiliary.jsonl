@@ -1,0 +1,2 @@
+{"source":"codex_history","session_id":"codex-s-001","prompt_id":"p-001","created_at":"2026-02-01T11:58:55Z","role":"user","content":"Check why clippy failed."}
+{"source":"codex_history","session_id":"codex-s-001","prompt_id":"p-002","created_at":"2026-02-01T11:58:57Z","role":"assistant","content":"The lint failed on an unused variable."}

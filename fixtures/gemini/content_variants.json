@@ -1,0 +1,20 @@
+{
+  "conversation_id": "gemini-c-variants",
+  "messages": [
+    {
+      "role": "user",
+      "timestamp": "2026-02-03T08:40:00Z",
+      "content": [{"text": "Analyze attached diagram."}, {"mime_type": "image/png", "uri": "file:///tmp/sample.png"}]
+    },
+    {
+      "role": "model",
+      "timestamp": "2026-02-03T08:40:02Z",
+      "content": [{"text": ""}, {"json": {"status": "partial", "score": 0.91}}]
+    },
+    {
+      "role": "model",
+      "timestamp": "bad-ts",
+      "content": []
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+2026-02-05T07:00:01Z INFO opencode.prompt_history message_id=msg-001 chars=34
+2026-02-05T07:00:03Z INFO opencode.runtime token_usage prompt=12 completion=19

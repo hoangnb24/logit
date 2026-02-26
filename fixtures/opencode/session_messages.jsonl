@@ -1,0 +1,2 @@
+{"sessionID":"oc-s-001","messageID":"msg-001","createdAt":"2026-02-05T07:00:00Z","role":"user","model":"gpt-5","provider":"openai"}
+{"sessionID":"oc-s-001","messageID":"msg-002","createdAt":"2026-02-05T07:00:02Z","role":"assistant","model":"gpt-5","provider":"openai"}

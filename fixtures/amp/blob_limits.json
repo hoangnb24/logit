@@ -1,0 +1,8 @@
+{
+  "thread_id": "amp-t-limits",
+  "blob_limit_bytes": 1024,
+  "attachments": [
+    {"attachment_id": "a-001", "size_bytes": 1024, "status": "at_limit"},
+    {"attachment_id": "a-002", "size_bytes": 1025, "status": "over_limit"}
+  ]
+}

@@ -1,0 +1,2 @@
+{"sessionID":"oc-s-001","messageID":"msg-001","partID":"part-001","kind":"input_text","text":"Please produce a release checklist."}
+{"sessionID":"oc-s-001","messageID":"msg-002","partID":"part-002","kind":"output_text","text":"Checklist: tests, docs, changelog, tag."}

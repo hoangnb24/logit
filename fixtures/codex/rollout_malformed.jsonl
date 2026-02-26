@@ -1,0 +1,3 @@
+{"session_id":"codex-s-bad","event_id":"evt-001","event_type":"user_prompt","created_at":"not-a-timestamp","text":"Malformed timestamp sample"}
+{"session_id":"codex-s-bad","event_id":"evt-002","event_type":"assistant_response"}
+this is not json

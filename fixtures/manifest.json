@@ -1,0 +1,122 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-02-25T00:00:00Z",
+  "all_data_synthetic": true,
+  "sources": [
+    {
+      "name": "codex",
+      "fixtures": [
+        {
+          "path": "fixtures/codex/rollout_primary.jsonl",
+          "kind": "jsonl",
+          "tags": ["happy-path", "primary-events"]
+        },
+        {
+          "path": "fixtures/codex/history_auxiliary.jsonl",
+          "kind": "jsonl",
+          "tags": ["auxiliary", "history"]
+        },
+        {
+          "path": "fixtures/codex/rollout_malformed.jsonl",
+          "kind": "jsonl",
+          "tags": ["edge-case", "malformed"]
+        },
+        {
+          "path": "fixtures/codex/tui_diagnostic.log",
+          "kind": "log",
+          "tags": ["diagnostic", "runtime-log"]
+        }
+      ]
+    },
+    {
+      "name": "claude",
+      "fixtures": [
+        {
+          "path": "fixtures/claude/project_session.jsonl",
+          "kind": "jsonl",
+          "tags": ["happy-path", "project-session"]
+        },
+        {
+          "path": "fixtures/claude/subagent_trace.jsonl",
+          "kind": "jsonl",
+          "tags": ["subagent", "trace"]
+        },
+        {
+          "path": "fixtures/claude/project_session_malformed.jsonl",
+          "kind": "jsonl",
+          "tags": ["edge-case", "malformed"]
+        },
+        {
+          "path": "fixtures/claude/mcp_cache_debug.log",
+          "kind": "log",
+          "tags": ["auxiliary", "diagnostic"]
+        }
+      ]
+    },
+    {
+      "name": "gemini",
+      "fixtures": [
+        {
+          "path": "fixtures/gemini/chat_messages.json",
+          "kind": "json",
+          "tags": ["happy-path", "chat-session"]
+        },
+        {
+          "path": "fixtures/gemini/content_variants.json",
+          "kind": "json",
+          "tags": ["edge-case", "content-variants"]
+        },
+        {
+          "path": "fixtures/gemini/conversations.pbmeta.json",
+          "kind": "json",
+          "tags": ["snapshot-only", "protobuf-index"]
+        }
+      ]
+    },
+    {
+      "name": "amp",
+      "fixtures": [
+        {
+          "path": "fixtures/amp/thread_payloads.json",
+          "kind": "json",
+          "tags": ["happy-path", "thread-payloads"]
+        },
+        {
+          "path": "fixtures/amp/blob_limits.json",
+          "kind": "json",
+          "tags": ["edge-case", "blob-limit"]
+        },
+        {
+          "path": "fixtures/amp/thread_payloads_malformed.json",
+          "kind": "json",
+          "tags": ["edge-case", "malformed"]
+        }
+      ]
+    },
+    {
+      "name": "opencode",
+      "fixtures": [
+        {
+          "path": "fixtures/opencode/session_messages.jsonl",
+          "kind": "jsonl",
+          "tags": ["happy-path", "message-metadata"]
+        },
+        {
+          "path": "fixtures/opencode/session_parts.jsonl",
+          "kind": "jsonl",
+          "tags": ["happy-path", "parts"]
+        },
+        {
+          "path": "fixtures/opencode/session_parts_orphan.jsonl",
+          "kind": "jsonl",
+          "tags": ["edge-case", "orphan-part"]
+        },
+        {
+          "path": "fixtures/opencode/runtime_prompt_history.log",
+          "kind": "log",
+          "tags": ["auxiliary", "runtime-log"]
+        }
+      ]
+    }
+  ]
+}
