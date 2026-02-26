@@ -19,6 +19,60 @@ env:
   TZ: UTC
 
 jobs:
+  ubs_changed_files:
+    name: UBS (changed Rust/TOML files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install UBS
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/ultimate_bug_scanner/master/ubs -o "$HOME/.local/bin/ubs"
+          chmod +x "$HOME/.local/bin/ubs"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/ubs" --version
+      - name: Determine changed Rust/TOML files
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            range="${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+            mapfile -t files < <(git diff --name-only --diff-filter=ACMRT "$range" -- '*.rs' '*.toml')
+          else
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" == "0000000000000000000000000000000000000000" ]]; then
+              mapfile -t files < <(git diff-tree --no-commit-id --name-only -r "${{ github.sha }}" -- '*.rs' '*.toml')
+            else
+              range="${before}...${{ github.sha }}"
+              mapfile -t files < <(git diff --name-only --diff-filter=ACMRT "$range" -- '*.rs' '*.toml')
+            fi
+          fi
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "has_files=false" >> "$GITHUB_OUTPUT"
+            echo "No Rust/TOML file changes detected for UBS lane."
+            exit 0
+          fi
+
+          printf '%s\n' "${files[@]}" > changed-rust-toml.txt
+          echo "has_files=true" >> "$GITHUB_OUTPUT"
+          echo "UBS target files:"
+          cat changed-rust-toml.txt
+      - name: Run UBS on changed files
+        if: steps.changed.outputs.has_files == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < changed-rust-toml.txt
+          ubs --ci --fail-on-warning "${files[@]}"
+
   quality:
     name: Quality (${{ matrix.gate.name }})
     runs-on: ubuntu-latest

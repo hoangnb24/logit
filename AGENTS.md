@@ -330,14 +330,17 @@ bv --robot-insights | jq '.Cycles'                         # Circular deps (must
 
 **Golden Rule:** `ubs <changed-files>` before every commit. Exit 0 = safe. Exit >0 = fix & re-run.
 
+**Policy:** Treat full-repo UBS (`ubs --ci --fail-on-warning .`) as a periodic baseline audit.
+The blocking merge gate is UBS on changed Rust/TOML files only.
+
 ### Commands
 
 ```bash
 ubs file.rs file2.rs                    # Specific files (< 1s) — USE THIS
-ubs $(git diff --name-only --cached)    # Staged files — before commit
+ubs $(git diff --name-only --cached -- '*.rs' '*.toml')    # Staged Rust/TOML files
 ubs --only=rust,toml src/               # Language filter (3-5x faster)
-ubs --ci --fail-on-warning .            # CI mode — before PR
-ubs .                                   # Whole project (ignores target/, Cargo.lock)
+ubs --ci --fail-on-warning file.rs      # Strict mode on scoped changed files
+ubs --ci --fail-on-warning .            # Full baseline audit (advisory; file follow-up beads)
 ```
 
 ### Output Format

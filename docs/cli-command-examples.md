@@ -161,6 +161,13 @@ cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 
+# 1b) UBS gate on changed Rust/TOML files (blocking)
+changed=$(git diff --name-only --cached -- '*.rs' '*.toml')
+[ -z "$changed" ] || ubs --ci --fail-on-warning $changed
+
+# 1c) Optional baseline UBS audit (advisory; create follow-up beads for broad findings)
+ubs --ci --fail-on-warning .
+
 # 2) Run an end-to-end artifact pass
 logit --out-dir /tmp/logit-out snapshot --source-root /work/repo --sample-size 5
 logit --out-dir /tmp/logit-out normalize --source-root /work/repo
@@ -175,6 +182,7 @@ Troubleshooting tips:
 - compare emitted artifact topology against `docs/run-artifact-topology-contract.md`
 - use `docs/troubleshooting-and-failure-cookbook.md` for known failure classes and recovery paths
 - if behavior changed intentionally, update this document and `README.md` in the same patch
+- if UBS baseline audits surface broad legacy findings, keep the changed-files gate green and file follow-up beads
 
 ## 8. Maintainer Notes
 

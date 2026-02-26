@@ -159,7 +159,14 @@ cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo test --workspace --all-targets
+
+# UBS merge gate: scan only changed Rust/TOML files
+changed=$(git diff --name-only --cached -- '*.rs' '*.toml')
+[ -z "$changed" ] || ubs --ci --fail-on-warning $changed
 ```
+
+Use full-repository UBS scans (`ubs --ci --fail-on-warning .`) as advisory baseline audits.
+When broad legacy findings appear, file follow-up beads instead of blocking unrelated changes.
 
 ## CI Matrix and Determinism
 
@@ -170,6 +177,8 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
   - `cargo fmt --check`
   - `cargo check --workspace --all-targets --locked`
   - `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- UBS lane (`ubuntu-latest`):
+  - installs UBS and runs `ubs --ci --fail-on-warning` on changed `*.rs`/`*.toml` files only
 - Test matrix lanes:
   - `cargo test --workspace --all-targets --locked -- --test-threads=1`
   - runs on `ubuntu-latest` and `macos-latest`

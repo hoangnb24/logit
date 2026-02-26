@@ -20,12 +20,17 @@ cargo fmt --check
 cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+
+# UBS merge gate on changed Rust/TOML files in release diff
+changed=$(git diff --name-only <BASE_SHA>...HEAD -- '*.rs' '*.toml')
+[ -z "$changed" ] || ubs --ci --fail-on-warning $changed
 ```
 
 - [ ] `cargo fmt --check` passed
 - [ ] `cargo check --workspace --all-targets` passed
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` passed
 - [ ] `cargo test --workspace --all-targets` passed
+- [ ] UBS changed-files gate passed (or no Rust/TOML changes in release diff)
 
 ## 3. Workflow Evidence (Snapshot → Normalize → Validate)
 
@@ -88,6 +93,7 @@ Use this table to prove each acceptance criterion with concrete evidence referen
 | Validate report includes schema/invariant outcomes and stable exit behavior | `cargo test --test validate_artifacts --test validate_invariants --test validate_schema --test cli_progress` | `<link-to-test-log-or-artifact>` | Pass / Fail |  |
 | End-to-end workflow remains consistent | `cargo test --test workflow_integration` | `<link-to-test-log-or-artifact>` | Pass / Fail |  |
 | Workspace quality gates hold | `cargo fmt --check`, `cargo check --workspace --all-targets`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace --all-targets` | `<link-to-gate-log-or-ci-run>` | Pass / Fail |  |
+| UBS changed-files gate holds | `ubs --ci --fail-on-warning <changed-rust-toml-files>` | `<link-to-ubs-log-or-ci-run>` | Pass / Fail |  |
 
 ### Evidence Summary
 
