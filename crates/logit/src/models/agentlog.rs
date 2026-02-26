@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub const SCHEMA_VERSION: &str = "agentlog.v1";
 
@@ -178,10 +178,12 @@ pub struct AgentLogEvent {
 #[must_use]
 pub fn json_schema() -> Value {
     let schema = schemars::schema_for!(AgentLogEvent);
-    match serde_json::to_value(schema) {
-        Ok(value) => value,
-        Err(error) => {
-            panic!("failed to serialize generated agentlog schema: {error}");
-        }
-    }
+    serde_json::to_value(schema).unwrap_or_else(|error| {
+        json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "AgentLogEvent",
+            "type": "object",
+            "x_schema_error": format!("failed to serialize generated agentlog schema: {error}")
+        })
+    })
 }

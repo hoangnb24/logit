@@ -445,11 +445,16 @@ pub fn parse_diagnostic_log_text(
             serde_json::json!(parsed.event.clone()),
         );
         if !parsed.fields.is_empty() {
-            metadata.insert(
-                "codex_log_fields".to_string(),
-                serde_json::to_value(&parsed.fields)
-                    .expect("codex diagnostic fields should serialize"),
-            );
+            match serde_json::to_value(&parsed.fields) {
+                Ok(value) => {
+                    metadata.insert("codex_log_fields".to_string(), value);
+                }
+                Err(error) => {
+                    warnings.push(format!(
+                        "line {line_number}: failed to serialize codex diagnostic fields: {error}"
+                    ));
+                }
+            }
         }
 
         events.push(AgentLogEvent {

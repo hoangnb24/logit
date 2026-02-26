@@ -274,11 +274,16 @@ pub fn parse_auxiliary_log_text(
             serde_json::json!(parsed.event.clone()),
         );
         if !parsed.fields.is_empty() {
-            metadata.insert(
-                "opencode_fields".to_string(),
-                serde_json::to_value(&parsed.fields)
-                    .expect("opencode auxiliary log fields should serialize"),
-            );
+            match serde_json::to_value(&parsed.fields) {
+                Ok(value) => {
+                    metadata.insert("opencode_fields".to_string(), value);
+                }
+                Err(error) => {
+                    warnings.push(format!(
+                        "line {line_number}: failed to serialize opencode auxiliary fields: {error}"
+                    ));
+                }
+            }
         }
 
         let content_text = if matches!(record_format, RecordFormat::Message) {

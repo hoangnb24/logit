@@ -205,8 +205,8 @@ pub fn parse_mcp_cache_debug_log(
         }
 
         let mut parts = trimmed.split_whitespace();
-        let first_token = parts.next();
-        let (timestamp_token, level, component) = match first_token {
+        let first_segment = parts.next();
+        let (timestamp_token, level, component) = match first_segment {
             Some(token) if looks_like_timestamp_token(token) => (
                 Some(token.to_string()),
                 parts.next().unwrap_or("UNKNOWN").to_string(),

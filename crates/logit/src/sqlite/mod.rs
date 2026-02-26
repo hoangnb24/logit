@@ -598,7 +598,7 @@ fn read_sqlite_rows(connection: &Connection) -> Result<SqliteMirrorRows> {
     let event_id_index = EVENT_INSERT_COLUMNS
         .iter()
         .position(|column| *column == "event_id")
-        .expect("event_id column should exist in insert column list");
+        .ok_or_else(|| anyhow!("event_id column missing from insert column list"))?;
     let query = format!(
         "SELECT {} FROM {EVENTS_TABLE} ORDER BY run_id, sequence_global, event_id",
         EVENT_INSERT_COLUMNS.join(", ")
