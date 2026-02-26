@@ -305,3 +305,4 @@ For reusable release-gate and acceptance-evidence templates, see:
 - `crates/logit/src/sqlite` SQLite schema/writer/parity support
 - `crates/logit/src/models` canonical `agentlog.v1` data model
 - `crates/logit/src/utils` shared utilities (hashing, redaction, time, content, history)
+# logit
