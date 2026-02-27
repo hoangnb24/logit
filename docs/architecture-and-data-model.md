@@ -24,22 +24,25 @@ Primary principles:
 
 ## 2. Pipeline Topology
 
-The runtime pipeline has four operator-facing stages:
+The runtime pipeline is exposed through six operator-facing command groups:
 
 1. `snapshot`  
 Produces evidence-oriented source summaries and representative samples.
 
 2. `normalize`  
-Fans in adapter outputs and emits canonical `agentlog.v1` artifacts.
+Fans in adapter outputs and emits canonical `agentlog.v1` artifacts plus discovery evidence.
 
 3. `validate`  
 Applies schema + invariant checks and emits machine-readable validation reports.
 
 4. `inspect`  
-Provides a read-only inspection entrypoint (baseline CLI surface).
+Provides a read-only inspection entrypoint for artifacts and raw source files.
 
-Optional persistence stage:
-- SQLite mirror + parity checks to support queryable local analytics while preserving canonical parity.
+5. `ingest refresh`  
+Materializes canonical `events.jsonl` into the local SQLite mart and records ingest-run/watermark metadata.
+
+6. `query`  
+Executes read-only local analytics workflows through `query sql`, `query schema`, `query catalog`, and `query benchmark`.
 
 ### 2.1 Agent-Queryable Data Plane Baseline (V1)
 
@@ -75,14 +78,15 @@ Operational implication:
 
 | Module | Responsibility | Key outputs |
 |---|---|---|
-| `crates/logit/src/cli` | argument parsing, command routing, runtime-flag plumbing | stable command surface (`snapshot`, `normalize`, `inspect`, `validate`) |
+| `crates/logit/src/cli` | argument parsing, command routing, runtime-flag plumbing | stable command surface (`snapshot`, `normalize`, `inspect`, `validate`, `ingest refresh`, `query ...`) |
 | `crates/logit/src/config` | runtime path resolution (`home_dir`, `cwd`, `out_dir`) | deterministic path context |
 | `crates/logit/src/discovery` | known-path registry, source classification, history-informed prioritization | `discovery/sources.json`, `discovery/zsh_history_usage.json` |
 | `crates/logit/src/adapters` | source-specific parsing and canonical mapping pre-normalize | adapter parse results + warnings |
 | `crates/logit/src/snapshot` | source profiling, sample extraction, redaction/truncation | `snapshot/index.json`, `snapshot/samples.jsonl`, `snapshot/schema_profile.json` |
 | `crates/logit/src/normalize` | orchestrator fan-in, dedupe/sort, schema + stats emission | `events.jsonl`, `agentlog.v1.schema.json`, `stats.json` |
 | `crates/logit/src/validate` | schema/invariant checks and severity policy | `validate/report.json` |
-| `crates/logit/src/sqlite` | SQLite schema, writer, parity verification | local DB mirror + parity report inputs |
+| `crates/logit/src/ingest` | ingest refresh planning, run lifecycle metadata, watermark updates | `ingest/report.json`, ingest run/watermark rows |
+| `crates/logit/src/sqlite` | SQLite schema, writer, semantic views, parity verification | `mart.sqlite`, queryable views, parity report inputs |
 | `crates/logit/src/models` | canonical `agentlog.v1` Rust types + schema generation | canonical type contracts |
 | `crates/logit/src/utils` | cross-cutting helpers (time/hash/content/redaction/history) | deterministic helper primitives |
 
@@ -104,7 +108,7 @@ Operational implication:
 ### 4.3 Current Maturity
 
 - Codex, Claude, Gemini, Amp, and OpenCode parsing components exist with fixture-backed tests.
-- Normalize orchestrator currently consumes the implemented ingestion paths and surfaces unsupported paths as explicit non-fatal warnings (rather than silent omission).
+- Normalize orchestrator consumes Codex, Claude, Gemini, and Amp ingestion paths that have canonical event mapping, and surfaces unsupported OpenCode normalize ingestion paths as explicit non-fatal warnings (rather than silent omission).
 
 ## 5. Canonical Data Model (`agentlog.v1`)
 

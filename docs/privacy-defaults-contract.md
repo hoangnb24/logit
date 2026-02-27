@@ -18,7 +18,7 @@ This contract is normative for v1.
 2. Snapshot output is safety-first and redaction-first.
 3. Normalize output is analysis-first and full-text by default.
 4. Redaction is deterministic: identical input yields identical redacted output.
-5. Privacy controls are explicit and visible in run metadata.
+5. Privacy behavior is explicit in emitted artifacts (`snapshot_truncated`, `pii_redacted`, `redaction_classes`) and warning/report surfaces.
 
 ## 3. Default Policy Matrix
 
@@ -26,8 +26,8 @@ This contract is normative for v1.
 |---|---|---|
 | `snapshot` | `snapshot/samples.jsonl` | Redacted + truncated excerpts |
 | `snapshot` | `snapshot/index.json`, `snapshot/schema_profile.json` | Metadata-only (no full message text) |
-| `normalize` | `normalize/events.jsonl` | Full text retained where available |
-| `normalize` | `normalize/stats.json`, schema artifact | Aggregates/structure only |
+| `normalize` | `events.jsonl` | Full text retained where available |
+| `normalize` | `stats.json`, schema artifact | Aggregates/structure only |
 | `validate` | validation report | No raw full-text echo by default; summarize paths/line refs |
 
 ## 4. Sensitive Pattern Classes (v1 baseline)
@@ -61,34 +61,28 @@ For normalize artifacts:
 1. `content_text` is retained by default for semantic completeness.
 2. `content_excerpt` may be generated for quick inspection but does not replace full text.
 3. Sensitive-value redaction is NOT applied by default in normalize mode.
-4. Privacy-sensitive deployments can override to reduce retention (see §7).
 
 Rationale:
 - normalization is the canonical semantic dataset
 - downstream dedupe/provenance/quality checks require unmodified conversational content
 
-## 7. Override Model (Normative Semantics)
+## 7. Runtime Policy Surface (Normative)
 
-The implementation must support explicit policy override in runtime config and CLI flags.
+The v1 runtime surface enforces:
+- snapshot redaction/truncation enabled by default
+- normalize full-text retention by default
+- no CLI/config switch that disables snapshot redaction
+- no CLI/config switch that suppresses normalize `content_text`
 
-Canonical override enums:
-- `snapshot_redaction_mode`: `strict` (default), `balanced`, `off`
-- `normalize_text_policy`: `full` (default), `excerpt_only`, `none`
-
-Precedence:
-1. CLI flag
-2. Config file value
-3. Built-in default
-
-Every non-default override must be recorded in run `manifest.json`.
+Policy changes require explicit code and contract updates.
 
 ## 8. Invariants and Guardrails
 
-1. If `snapshot_redaction_mode != off`, snapshot artifacts must not contain unredacted values that match sensitive-pattern classes.
-2. If `normalize_text_policy = none`, `content_text` must be omitted (not null) from normalized events.
-3. If `normalize_text_policy = excerpt_only`, `content_text` omitted and `content_excerpt` retained.
-4. `pii_redacted = true` must be set on records where redaction mutated text.
-5. Validation reports must include privacy-policy metadata used for the run.
+1. Snapshot artifacts must not contain unredacted values that match configured sensitive-pattern classes.
+2. Redacted snapshot samples must preserve deterministic truncation behavior.
+3. Normalize artifacts retain `content_text` when adapters emit textual content.
+4. Snapshot sample rows include redaction/truncation markers when mutation occurs.
+5. Validation reports remain machine-readable and avoid replaying full raw payloads.
 
 ## 9. Known Limitations (Explicit)
 
@@ -99,4 +93,4 @@ Every non-default override must be recorded in run `manifest.json`.
 ## 10. Compatibility
 
 - This contract is v1 behavior.
-- Breaking policy semantics (for example, changing default normalize behavior away from full-text) requires explicit version bump and migration notes.
+- Breaking policy semantics (for example, changing normalize full-text defaults or snapshot redaction defaults) requires explicit contract revision and migration notes.

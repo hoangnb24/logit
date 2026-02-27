@@ -53,6 +53,7 @@ This document defines the ordered known-path discovery candidates per supported 
 | `10` | `~/.amp/sessions` | `session_store` | `directory` | `true` |
 | `20` | `~/.amp/history` | `history_stream` | `directory` | `true` |
 | `30` | `~/.amp/logs` | `runtime_diagnostics` | `text_log` | `true` |
+| `40` | `~/.amp/file-changes` | `session_store` | `directory` | `true` |
 
 ### 3.5 OpenCode
 

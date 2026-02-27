@@ -1,140 +1,104 @@
-# Run Artifact Topology and Manifest Contract
+# Run Artifact Topology Contract
 
 Status: canonical for `bd-2n2`  
 Schema family: `agentlog.v1` ecosystem  
-Root output directory: `~/.logit/output`
+Default output directory: `<home_dir>/.logit/output`
 
 ## 1. Contract Purpose
 
-This contract freezes on-disk output layout and metadata conventions for `logit` runs so:
-- automation can locate artifacts without heuristics
-- downstream stages (`normalize`, `validate`, docs/tests) can rely on stable paths
-- repeated executions remain auditable and deterministic
+This contract defines stable on-disk artifact paths so automation can locate outputs without heuristics.
 
-## 2. Root Layout
+The artifact topology is:
+- deterministic by command and `--out-dir`
+- shared across runs (fixed file paths, overwritten by subsequent runs)
+- machine-readable for downstream stages (`validate`, `ingest`, `query`, release evidence)
+
+## 2. Output Root and Resolution
+
+Output root is resolved from runtime flags:
+- `--out-dir <PATH>` when provided
+- otherwise `<home_dir>/.logit/output`
+
+`home_dir` and `cwd` resolution semantics are defined by `crates/logit/src/config/mod.rs`.
+
+## 3. Artifact Layout
 
 ```text
-~/.logit/output/
-  runs/
-    <run_id>/
-      manifest.json
-      command.json
-      normalize/
-        events.jsonl
-        agentlog.v1.schema.json
-        stats.json
-      snapshot/
-        index.json
-        samples.jsonl
-        schema_profile.json
-      validate/
-        report.json
-      logs/
-        warnings.jsonl
-        errors.jsonl
-  indexes/
-    runs.jsonl
+<out_dir>/
+  events.jsonl
+  agentlog.v1.schema.json
+  stats.json
+  mart.sqlite
+  snapshot/
+    index.json
+    samples.jsonl
+    schema_profile.json
+  discovery/
+    sources.json
+    zsh_history_usage.json
+  validate/
+    report.json
+  ingest/
+    report.json
+  benchmarks/
+    answerability_report_v1.json
 ```
 
-Rules:
-- `runs/<run_id>/` is immutable once the run is marked complete.
-- Every run directory MUST contain `manifest.json` and `command.json`.
-- Stage directories (`normalize`, `snapshot`, `validate`) are created only when that stage/command executes.
-- `indexes/runs.jsonl` is append-only and contains one summary record per completed run.
+## 4. Command-to-Artifact Mapping
 
-## 3. Run ID and Naming Contract
+### 4.1 `snapshot`
 
-`run_id` format:
-- `YYYYMMDDTHHMMSSZ_<suffix>`
-- `<suffix>` is 8 lowercase hex chars from deterministic hash of `(command, start_time_ns, pid, cwd)`
+Writes:
+- `snapshot/index.json`
+- `snapshot/samples.jsonl`
+- `snapshot/schema_profile.json`
 
-Examples:
-- `20260225T072706Z_a13f9b2c`
-- `20260225T101512Z_74e1c0ad`
+`snapshot/samples.jsonl` is newline-delimited JSON (one JSON object per line).
 
-Naming invariants:
-1. Filenames are lowercase with `.json`, `.jsonl`, or no extension directory names.
-2. No spaces in directory or file names.
-3. Stage artifact filenames are fixed (never user-configurable).
+### 4.2 `normalize`
 
-## 4. Required Per-Run Metadata Files
+Writes:
+- `events.jsonl`
+- `agentlog.v1.schema.json`
+- `stats.json`
+- `discovery/sources.json`
+- `discovery/zsh_history_usage.json`
 
-## 4.1 `manifest.json`
+`events.jsonl` is newline-delimited canonical `agentlog.v1` rows.
 
-Canonical run manifest for discovery and automation.
+### 4.3 `validate`
 
-Required keys:
-- `manifest_version`: string, exactly `logit.run-manifest.v1`
-- `schema_version`: string, exactly `agentlog.v1`
-- `run_id`: string, matches directory name
-- `command`: string (`snapshot` | `normalize` | `inspect` | `validate`)
-- `status`: string (`running` | `success` | `partial_failure` | `failed`)
-- `started_at_utc`: RFC3339 UTC timestamp
-- `finished_at_utc`: RFC3339 UTC timestamp or omitted while running
-- `host`: object with `os`, `arch`, `hostname` (hostname optional)
-- `paths`: object with `output_root`, `run_dir`, `source_roots` (array)
-- `adapters`: array of adapter names attempted (`codex`,`claude`,`gemini`,`amp`,`opencode`)
-- `artifact_map`: object mapping logical artifact names to relative paths
-- `counts`: object with at least `records_emitted`, `warnings`, `errors`
+Writes:
+- `validate/report.json`
 
-Optional keys:
-- `git`: object (`commit`, `dirty`) when repository context is detected
-- `duration_ms`: integer, present once finished
-- `failure_summary`: object for non-success statuses
+### 4.4 `ingest refresh`
 
-## 4.2 `command.json`
+Writes:
+- `mart.sqlite`
+- `ingest/report.json`
 
-Machine-readable execution request snapshot.
+`mart.sqlite` contains canonical tables/views plus ingest metadata tables (`ingest_runs`, `ingest_watermarks`).
 
-Required keys:
-- `command`: subcommand name
-- `argv`: full argv array
-- `effective_config`: resolved runtime config object (fully expanded paths)
-- `requested_at_utc`: RFC3339 UTC timestamp
+### 4.5 `query benchmark`
 
-Optional keys:
-- `env_hints`: whitelisted environment values used for behavior (no secrets)
+Writes:
+- `benchmarks/answerability_report_v1.json`
 
-## 5. Stage Artifact Contracts
+Other `query` commands (`query sql`, `query schema`, `query catalog`) emit JSON envelopes to stdout and do not write additional artifact files.
 
-## 5.1 `normalize/`
-- `events.jsonl`: canonical normalized events (`agentlog.v1` records)
-- `agentlog.v1.schema.json`: schema describing event record contract
-- `stats.json`: aggregate counts, adapter contributions, quality metrics
+### 4.6 `inspect`
 
-## 5.2 `snapshot/`
-- `index.json`: discovered source inventory and artifact pointers
-- `samples.jsonl`: representative sample records/events (possibly redacted)
-- `schema_profile.json`: per-source key/type profile summary
+`inspect` emits text/JSON inspection output to stdout and does not write runtime artifact files.
 
-## 5.3 `validate/`
-- `report.json`: machine-readable validation output including exit-code interpretation fields
+## 5. Determinism and Safety Invariants
 
-## 5.4 `logs/`
-- `warnings.jsonl`: structured warnings generated during run
-- `errors.jsonl`: structured per-record or run-level errors
+1. Artifact file names and relative locations are fixed.
+2. Directory creation is command-driven and idempotent (`create_dir_all` semantics).
+3. JSON/JSONL artifacts are encoded as UTF-8.
+4. Commands fail with explicit runtime errors when required files cannot be read/written.
+5. `query` and `ingest` command responses are JSON envelope objects on stdout.
 
-## 6. `artifact_map` Semantics
+## 6. Compatibility Policy
 
-`manifest.json.artifact_map` keys are logical identifiers and values are paths relative to `runs/<run_id>/`.
-
-Required logical keys by command:
-- `normalize`: `events_jsonl`, `schema_json`, `stats_json`
-- `snapshot`: `snapshot_index_json`, `snapshot_samples_jsonl`, `snapshot_schema_profile_json`
-- `validate`: `validate_report_json`
-
-If a key is required for command mode but artifact is not produced, run status MUST be `failed` or `partial_failure` with failure details.
-
-## 7. Determinism and Safety Invariants
-
-1. Path generation must be independent of locale.
-2. Re-running identical inputs may produce different `run_id`, but artifact filenames and JSON key ordering policies must remain stable.
-3. `manifest.json` must be atomically finalized (write temp + rename) to avoid half-written terminal state.
-4. Artifact files must never be written outside `~/.logit/output` unless explicit override is requested.
-5. Absolute source paths may appear in manifests; secret-bearing environment values must not.
-
-## 8. Backfill/Compatibility Rules
-
-- This contract defines v1 topology only.
-- Any breaking layout change requires `logit.run-manifest.v2` and explicit migration notes.
-- Additive fields in JSON files are permitted when they do not alter required semantics.
+- Additive artifacts are permitted when existing paths and payload contracts remain stable.
+- Breaking path/layout changes require explicit contract revision and corresponding README/docs updates.

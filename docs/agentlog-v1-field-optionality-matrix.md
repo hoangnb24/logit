@@ -71,8 +71,8 @@ Legend:
 ## Conditional Field Notes
 
 1. `tool_name` and `tool_result_text` are never emitted for non-tool records.
-2. For policy mode `normalize_text_policy = none`, `content_text` is omitted by design.
-3. For policy mode `normalize_text_policy = excerpt_only`, `content_text` omitted while `content_excerpt` may be present.
+2. `content_text` is omitted when adapters do not emit textual payloads for the source record.
+3. `content_excerpt` may be present when an adapter emits text and excerpt derivation succeeds.
 
 ## Validation Expectations
 

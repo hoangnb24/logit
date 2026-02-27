@@ -7,13 +7,14 @@ It discovers local agent artifacts (Codex, Claude, Gemini, Amp, OpenCode), produ
 ## Status
 
 Current implementation includes:
-- CLI surface: `snapshot`, `normalize`, `inspect`, `validate`
+- CLI surface: `snapshot`, `normalize`, `inspect`, `validate`, `ingest refresh`, `query sql`, `query schema`, `query catalog`, `query benchmark`
 - Runtime/global flags: `--home-dir`, `--cwd`, `--out-dir`
 - Canonical schema/model generation for `agentlog.v1`
 - Snapshot artifact emission (`snapshot/index.json`, `snapshot/samples.jsonl`, `snapshot/schema_profile.json`)
 - Normalize orchestration + artifact emission (`events.jsonl`, `agentlog.v1.schema.json`, `stats.json`)
 - Validation report artifact emission (`validate/report.json`) with strict/baseline modes
-- Optional SQLite schema/writer/parity support
+- SQLite mart schema/writer/parity support (`mart.sqlite`, ingest metadata tables, semantic query views)
+- JSON envelope contract for `ingest` and `query` command responses
 - V1 agent-query data plane baseline contract (`docs/agent-query-data-plane-v1-contract.md`)
 
 ## Requirements
@@ -59,11 +60,23 @@ Inspect an artifact:
 cargo run -p logit -- inspect "$OUT_DIR/events.jsonl" --json
 ```
 
+Materialize the SQLite mart:
+
+```bash
+cargo run -p logit -- --out-dir "$OUT_DIR" ingest refresh
+```
+
+Run a read-only SQL query:
+
+```bash
+cargo run -p logit -- --out-dir "$OUT_DIR" query sql "select event_type, count(*) as n from agentlog_events group by event_type"
+```
+
 ## Command Guide
 
 ### Global runtime flags
 
-These apply to `snapshot`, `normalize`, and `validate`:
+These apply to `snapshot`, `normalize`, `validate`, `ingest`, and `query`:
 
 - `--home-dir <PATH>`: overrides home directory for runtime path resolution
 - `--cwd <PATH>`: overrides current working directory for relative path resolution
@@ -103,7 +116,7 @@ Behavior:
   - `zsh_history_usage.json`
 
 Note:
-- current orchestrator support is focused on implemented adapters (Codex + Claude event ingestion paths), while unsupported adapters are surfaced as non-fatal warnings.
+- normalize orchestrator ingests Codex, Claude, Gemini, and Amp sources through implemented parsing paths; unsupported OpenCode normalize ingestion paths are surfaced as non-fatal warnings.
 
 ### `validate`
 
@@ -136,6 +149,10 @@ Behavior:
 - materializes normalized `events.jsonl` into local SQLite mart (`mart.sqlite`)
 - emits JSON envelope output only (success and failure paths)
 - writes ingest report artifact at `<out_dir>/ingest/report.json`
+
+Options:
+- `--source-root <PATH>` sets source-root metadata captured in ingest run/report records (defaults to runtime `cwd`)
+- `--fail-fast` fails on the first invalid `events.jsonl` row instead of collecting warning-mode skips
 
 ### `query sql`
 
@@ -302,7 +319,7 @@ For reusable release-gate and acceptance-evidence templates, see:
 - `crates/logit/src/snapshot` snapshot evidence generation
 - `crates/logit/src/normalize` canonical normalization orchestration and artifacts
 - `crates/logit/src/validate` schema/invariant validation and reports
+- `crates/logit/src/ingest` ingest refresh orchestration, run metadata, and watermark management
 - `crates/logit/src/sqlite` SQLite schema/writer/parity support
 - `crates/logit/src/models` canonical `agentlog.v1` data model
 - `crates/logit/src/utils` shared utilities (hashing, redaction, time, content, history)
-# logit

@@ -56,7 +56,7 @@ Normalize mode favors canonical analytic completeness:
 Operational guidance:
 - treat normalize outputs as sensitive datasets
 - store and share `events.jsonl` with the same controls as source logs
-- if compliance requires lower retention, use policy overrides documented in privacy contract (`normalize_text_policy`)
+- apply external storage/access controls when lower-retention handling is required
 
 ## 5. Validation Safety Behavior
 

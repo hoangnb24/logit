@@ -70,7 +70,79 @@ Expected behavior:
 - validation mode selection is deterministic (`Strict` vs `Baseline`)
 - machine-readable report artifact is written to resolved output layout at `validate/report.json`
 
-## 6. Error/Failure Expectations
+## 6. `ingest refresh` Examples
+
+Example:
+
+```bash
+logit --out-dir /tmp/logit-out ingest refresh --source-root /work/repo --fail-fast
+```
+
+Expected behavior:
+- normalized `events.jsonl` is read from `/tmp/logit-out/events.jsonl`
+- local mart is materialized at `/tmp/logit-out/mart.sqlite`
+- ingest run/watermark metadata is updated in SQLite
+- JSON envelope output is emitted to stdout
+- machine-readable ingest report is written to `/tmp/logit-out/ingest/report.json`
+
+## 7. `query` Examples
+
+### 7.1 `query sql`
+
+Example:
+
+```bash
+logit --out-dir /tmp/logit-out query sql \
+  "SELECT event_type, COUNT(*) AS n FROM agentlog_events GROUP BY event_type ORDER BY n DESC" \
+  --row-cap 100 \
+  --params null
+```
+
+Expected behavior:
+- exactly one read-only statement is accepted
+- scalar or array JSON params are bound when provided
+- JSON envelope output includes row payload plus runtime metadata (`row_count`, `truncated`, `row_cap`, `duration_ms`, `params_count`)
+
+### 7.2 `query schema`
+
+Example:
+
+```bash
+logit --out-dir /tmp/logit-out query schema --include-internal
+```
+
+Expected behavior:
+- JSON envelope output includes tables/views and column metadata
+- internal schema objects are included only when `--include-internal` is set
+
+### 7.3 `query catalog`
+
+Example:
+
+```bash
+logit --out-dir /tmp/logit-out query catalog --verbose
+```
+
+Expected behavior:
+- JSON envelope output includes semantic concepts and relations
+- verbose mode includes per-concept field catalogs
+
+### 7.4 `query benchmark`
+
+Example:
+
+```bash
+logit --out-dir /tmp/logit-out query benchmark \
+  --corpus fixtures/benchmarks/answerability_question_corpus_v1.json \
+  --row-cap 200
+```
+
+Expected behavior:
+- deterministic benchmark execution uses the mapped question/query-plan corpus
+- JSON envelope output includes per-question and aggregate benchmark results
+- benchmark artifact is written to `/tmp/logit-out/benchmarks/answerability_report_v1.json`
+
+## 8. Error/Failure Expectations
 
 Representative failures:
 - invalid runtime path inputs (for commands that consume runtime paths) produce explicit errors
@@ -83,11 +155,11 @@ Process exit code contract:
 - `2`: validation failure (`validate` found invalid records)
 - `64`: usage/argument parsing failure
 
-## 7. Persona Workflow Recipes
+## 9. Persona Workflow Recipes
 
 The recipes below map user goals to concrete command flows, expected artifacts, and fast triage checks.
 
-### 7.1 Debugger Persona
+### 9.1 Debugger Persona
 
 Goal:
 - explain why a normalize/validate run failed and isolate the bad source quickly
@@ -117,7 +189,7 @@ Troubleshooting tips:
 - use `snapshot/samples.jsonl` to inspect representative malformed rows before adapter-level debugging
 - use strict-mode findings in `validate/report.json` to distinguish schema failures vs semantic invariant failures
 
-### 7.2 Analyst Persona
+### 9.2 Analyst Persona
 
 Goal:
 - produce stable normalized data for downstream analysis and quality checks
@@ -147,7 +219,7 @@ Troubleshooting tips:
 - use `discovery/sources.json` when expected adapter paths are missing from the run
 - if validation fails, use line-level report diagnostics to isolate bad records early
 
-### 7.3 Maintainer Persona
+### 9.3 Maintainer Persona
 
 Goal:
 - verify release readiness and deterministic behavior before landing changes
@@ -184,7 +256,7 @@ Troubleshooting tips:
 - if behavior changed intentionally, update this document and `README.md` in the same patch
 - if UBS baseline audits surface broad legacy findings, keep the changed-files gate green and file follow-up beads
 
-### 7.4 Agent Query Persona (Centralized Data Plane)
+### 9.4 Agent Query Persona (Centralized Data Plane)
 
 Goal:
 - answer usage/performance/freshness/reliability questions from the local SQLite mart with deterministic JSON envelopes
@@ -225,7 +297,7 @@ Troubleshooting tips:
 - if `meta.diagnostics.likely_full_scan=true`, add `WHERE`/`LIMIT` or switch to an aggregate view
 - treat freshness answers as ingest-metadata questions (`ingest_runs`, `ingest_watermarks`), not wall-clock guesses
 
-### 7.5 Agent Prompt + SQL Template Pack (V1)
+### 9.5 Agent Prompt + SQL Template Pack (V1)
 
 Use these templates when an agent needs a fast, deterministic first answer. Start with `--row-cap 200` unless the expected result is a very small scalar/table.
 
@@ -329,7 +401,7 @@ SELECT
 FROM recent" --row-cap 50
 ```
 
-### 7.6 Operator Rollout Recipe (Answerability Gate Evidence)
+### 9.6 Operator Rollout Recipe (Answerability Gate Evidence)
 
 Goal:
 - produce release-review evidence showing current ingest freshness context and answerability benchmark outcomes
@@ -363,7 +435,7 @@ Troubleshooting tips:
 - if many questions fail due `answer_contract_mismatch`, inspect missing fields/order checks before raising row caps
 - treat stale watermark states as release-risk signals even when benchmark score is otherwise high
 
-## 9. Maintainer Notes
+## 10. Maintainer Notes
 
 - These examples are intended as stable CLI contract guidance.
 - Any flag or positional changes must update:
